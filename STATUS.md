@@ -3,7 +3,7 @@
 ## In progress
 Plan: plans/2026-07-24-news-sentiment-accuracy.md
 Branch: feature/news-sentiment-accuracy · PR #36 (do not merge — regression found in manual checks)
-Reviewer: running (iteration 3 — relevance saturation fix)
+Coding agent: running (fix pass — NSA3-I1 unpinned saturation fix, NSA3-I2, NSA3-S1)
 Open: NSA-Q1 (analyse-cap tuning) — reviews/2026-07-24-news-sentiment-accuracy.md
 
 ## Blocked
