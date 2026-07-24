@@ -1,6 +1,6 @@
 # Review: News & sentiment — retrieval coverage and scoring accuracy
 Date: 2026-07-24
-Status: (not implemented — iteration 3 open; see below)
+Status: (not implemented — iteration 4 open; see below)
 
 > **Stamp correction, iteration 3.** This file was stamped `Status: IMPLEMENTED — 2026-07-24`
 > after iteration 2. That stamp was premature: the owner's manual checks against live data
@@ -13,10 +13,11 @@ Status: (not implemented — iteration 3 open; see below)
 Branch: `feature/news-sentiment-accuracy` · PR https://github.com/tpattyn0/meridian/pull/36
 Plan: `plans/2026-07-24-news-sentiment-accuracy.md` (all 14 tasks, 0-13)
 
-**This file covers three review iterations.** Iteration 1 (below) reviewed `main...39a6910f`.
+**This file covers four review iterations.** Iteration 1 (below) reviewed `main...39a6910f`.
 Iteration 2 (`# Iteration 2`) reviewed the fix pass, `3a108f29..41c9efd9`.
-Iteration 3 (`# Iteration 3`, at the bottom) reviewed the saturation-regression fix pass,
-`211b0b3c..b468606f`. Earlier iterations' findings are retained verbatim as the record of what was
+Iteration 3 (`# Iteration 3`) reviewed the saturation-regression fix pass, `211b0b3c..b468606f`.
+Iteration 4 (`# Iteration 4`, at the bottom) reviewed the NSA3 fix pass, `b468606f..064d813b`.
+Earlier iterations' findings are retained verbatim as the record of what was
 raised; their resolution status is recorded in the iteration that verified them.
 
 ---
@@ -848,3 +849,221 @@ accurately describe the code at HEAD (the Tradeoffs paragraph needs the numeric 
 NSA3-S1, which is a factual fix to an existing ADR, not a new decision). If the owner chooses
 NSA3-Q1 option (b), the narrowed pattern set is a refinement of ADR-36's mechanism and should be
 recorded as an amendment to ADR-36 rather than a new ADR.
+
+---
+
+# Iteration 4
+
+Date: 2026-07-24
+Branch HEAD reviewed: `064d813b`
+Diff reviewed: `git diff b468606f..HEAD` — 8 files, +525 / -35 (the NSA3 fix pass, commit
+`3bf5f4ca`, plus the orchestrator's `STATUS.md` bump `064d813b`)
+
+**Security-pass note.** The `security-review` skill diffs the *working tree against HEAD*; this
+branch is fully committed, so it diffed the whole branch against `main` instead of the iteration-4
+range — no meaningful input for this iteration. Per CLAUDE.md's Reviewer Step 1 carve-out the skill
+output was set aside and the security pass run manually against `b468606f..HEAD`. The range touches
+one source file (`lib/utils/news-relevance.ts` — a pure, dependency-free scoring function), its test
+file, and six doc/index files. No new I/O, network, DB, filesystem, auth, or user-input surface; no
+credentials; no `eval`/`exec`/`dangerouslySetInnerHTML`; the added regexes are built from
+hardcoded literal constants with no interpolation of untrusted input. `gitleaks` clean via the
+Verify block. **Nothing to report.**
+
+**Verify block re-run live at HEAD:** pass — typecheck ok, lint ok (pre-existing warnings only,
+none new), **377/377 tests**, gitleaks `no leaks found`.
+
+## Summary
+Findings: 0 BLOCKERs, 1 ISSUE, 1 SUGGESTION, 0 QUESTIONs
+Requires owner decision: none (NSA-Q1 remains open from iteration 1 — carried forward untouched,
+still the owner's call at merge time, not a new finding)
+Ready for Coding agent: NSA4-I1, NSA4-S1
+
+**Iteration 3's four findings are all genuinely fixed.** I re-verified each by mutation and probe
+rather than by reading the diff (details below). The saturation fix is now properly pinned, the
+actor anchor removed the false-positive class it was aimed at, the constant-coupling guard works,
+and both index files are corrected.
+
+**One new finding, NSA4-I1**, which is the reverse of the one the fix pass was asked to check. The
+directed question was about a *false negative* (a 13F notice surviving undemoted). That miss is
+real, but investigating its mechanism surfaced something more consequential travelling with it: the
+same positional constraint also **reintroduces the NSA3-Q1 false-positive class through a new
+route** — a genuine corporate-action headline about Alphabet itself is now demoted, because
+"Alphabet Inc." satisfies the institutional-actor suffix. Precision, not just recall, regressed at
+the edges. I judge the anchored approach sound and worth keeping, but this specific case worth
+fixing rather than deferring — reasoning in the finding.
+
+## Findings
+
+### NSA4-I1 — ISSUE
+**File:** `lib/utils/news-relevance.ts:191-225` (`INSTITUTIONAL_ACTOR_SUFFIX` / `ACTOR_NAME` and the
+four `BOILERPLATE_TITLE_PATTERNS`)
+
+**Problem.** `ACTOR_NAME` requires the institutional suffix to be the token **immediately** preceding
+the holdings verb (`\w+(?:\s\w+){0,4}\s<SUFFIX>` then `\s<verb>`). That single positional constraint
+produces errors in *both* directions, and I confirmed each by direct probe against the committed
+scorer at HEAD (all scored for `symbol='GOOGL'`, `companyName='Alphabet Inc.'`, `symbols:['GOOGL']`,
+matching the RSS shape):
+
+*Direction 1 — false negatives (the reported case, and it is not isolated).* Any real filer name
+with words *after* the suffix, or with a suffix not in the list, escapes demotion:
+
+| Title | Score | Expected |
+|---|---|---|
+| `Mcdonald Capital Investors Inc. CA Sells 2,220 Shares of Alphabet Inc. $GOOGL` | **0.80** | 0.40 |
+| `Jones Financial Companies Lllp Buys 1,000 Shares of Alphabet Inc. $GOOGL` | **0.80** | 0.40 |
+| `Van ECK Associates Corp Sells 500 Shares of Alphabet Inc. $GOOGL` | **0.80** | 0.40 |
+| `Teacher Retirement System of Texas Buys 900 Shares of Alphabet Inc. $GOOGL` | **0.80** | 0.40 |
+| `State of New Jersey Common Pension Fund D Buys 900 Shares of Alphabet Inc. $GOOGL` | **0.80** | 0.40 |
+
+The reported `Mcdonald Capital Investors Inc. CA` fails because `CA` sits between the suffix and the
+verb. `Lllp` and `Corp` are simply absent from the suffix list (note `Corp` is absent even though
+`CORP_SUFFIX` elsewhere in this same file lists it). `Retirement System of Texas` and `Pension
+Fund D` fail on trailing words again. These are all ordinary MarketBeat filer-name shapes, so the
+class is broader than the 1-of-20 live figure suggests — that figure measures one symbol's feed on
+one day, not the pattern's reach.
+
+*Direction 2 — a new false positive, and this is the part that matters.* Because the anchor accepts
+**any** name+suffix, including the requested company's own, a genuine corporate-action headline is
+now demoted:
+
+| Title | Score | Correct |
+|---|---|---|
+| `Alphabet Inc. Buys 100,000 Shares of Anthropic in AI push` | **0.40 (demoted)** | 0.80 |
+| `Berkshire Hathaway Inc. Buys 5,000,000 Shares of Alphabet` | **0.40 (demoted)** | 0.80 |
+
+Pattern 1 matches `"Alphabet Inc. Buys 100,000 Shares of"` — Alphabet is the *subject acquiring*,
+not an anonymous fund reporting a 13F position. This is precisely the class NSA3-Q1 was opened to
+eliminate ("genuine corporate-action headlines demoted"), reintroduced by a different mechanism.
+
+The existing regression test does not catch it because of a detail worth flagging on its own:
+`news-relevance.test.ts:380` asserts `"Berkshire Hathaway Buys 5,000,000 Shares of Alphabet"` → 0.8
+and passes — but adding the `Inc.` that the real entity's name actually carries flips it to 0.40.
+The test passes only by omitting the suffix nearly every real filer has, so it certifies a case
+narrower than the one it appears to cover.
+
+**Judgement (responding to the directed question).** The anchored approach is **sound and should be
+kept** — the owner's NSA3-Q1 reasoning still holds, and mutation testing confirms it works: making
+the anchor optional (reverting to bare verb+noun) fails a test, so the tightening is real and
+pinned. The weakness is not the anchor concept but the **positional adjacency** requirement plus an
+incomplete suffix list. Two consequences follow, and I weigh them differently:
+
+- The false negatives (direction 1) are the *safe* failure mode. An undemoted 13F notice scores
+  0.80, competing on equal footing with real coverage rather than dominating it — the saturation fix
+  already removed the crowding-out mechanism. Cost is small and bounded.
+- The false positive (direction 2) is the *unsafe* one, and it is the failure the owner explicitly
+  judged worse ("the previous unanchored version demoted real news, which is the worse failure").
+  Demoting `Alphabet Inc. Buys ... Shares of Anthropic` to exactly `MIN_RELEVANCE` puts a genuine,
+  material corporate-action headline at the filter boundary, retained only by the `>=` comparison.
+
+So I do **not** recommend deferring wholesale. Deferring direction 1 to `TECH_DEBT.md` is legitimate
+and is what I recommend; direction 2 should be fixed now, because it is a regression against the
+stated goal of the iteration-3 fix rather than a gap at the edges.
+
+**Recommendation.**
+1. **Fix now (direction 2, low risk, high value):** exclude the requested company from satisfying
+   the actor anchor. The scorer already has the tokens — reject a boilerplate match when the actor
+   segment contains a company-core token from `deriveMatchTokens`. This narrows demotion strictly
+   (it can only ever *un*-demote), so it cannot reintroduce any false negative. Add the two
+   direction-2 titles above as regression cases, and **change the existing `test:380` case to use
+   `"Berkshire Hathaway Inc."`** so it tests the realistic shape.
+2. **Fix now (cheap, contained):** add `Corp`, `Corporation`, `Lllp`, `Associates`, `Pension\sFund`
+   to `INSTITUTIONAL_ACTOR_SUFFIX`. Pure additions to an alternation list; each only widens
+   demotion to unambiguous institutional shapes.
+3. **Defer to `TECH_DEBT.md` (direction 1's structural half):** the adjacency requirement — allowing
+   trailing words between the suffix and the verb (e.g. `<SUFFIX>(\s\w+){0,2}\s<verb>`) trades
+   precision for recall in a way that needs its own false-positive probe, which is more than this
+   iteration should absorb. Record it as a new low-severity row referencing this finding, noting the
+   measured 1/20 live rate and that the failure mode is benign (undemoted, not misranked). This is
+   an explicit deferral, per the task's instruction to say so either way.
+
+### NSA4-S1 — SUGGESTION
+**File:** `reviews/INDEX.md:5`
+
+**Problem.** The iteration-3 row records `verify 378/378`. The suite at HEAD is **377/377** (43
+files) — I re-ran the Verify block live. The commit message for `3bf5f4ca` says "372 → 377/378",
+suggesting the 378 is a transcription slip. Minor, but `reviews/INDEX.md` is the at-a-glance
+lifecycle record and a wrong count there is the kind of small drift that later gets cited as fact.
+
+**Recommendation.** Correct `378/378` to `377/377` in the iteration-3 row, in whichever commit next
+touches the index (e.g. the eventual re-stamp).
+
+## Directed verification — results
+
+Each item the orchestrator asked me to confirm, with what I actually did.
+
+**1. Iteration-3 fixes genuinely resolved.** Verified independently, not by reading:
+- *NSA3-I1 (saturation unpinned).* Reproduced the mutation in a throwaway `git worktree`: reverting
+  `scoreRelevance` to the per-token accumulation loop fails **5 of 28** tests (was 0 of 23). Matches
+  the reported figure exactly. **Genuinely fixed** — the new non-boilerplate exact-equality tests are
+  what catch it, and no other mechanism in the file can rescue those assertions.
+- *NSA3-Q1 (false positives).* Confirmed `SoftBank trims stake in Alphabet to fund AI buildout` and
+  `Alphabet shares sold by CEO Sundar Pichai under 10b5-1 plan` both score **0.80 undemoted**, and
+  all six true-13F shapes still demote to **0.40**. Fixed for the probed set — with the new
+  exception in NSA4-I1.
+- *Record correction accepted:* agreed on `S&P 500 index raises its position in tech names after
+  rebalance`. It scores 0.30 because it never mentions Alphabet/GOOGL in the title, so it earns only
+  the symbols bonus — correct *irrelevance* filtering, not a demotion. Iteration 3's table listed it
+  under false positives; that characterisation was wrong and the fix pass's test comment already
+  documents this correctly. Noted here so the record is straight.
+- *NSA3-S1 (coupling).* The dedicated test asserts `score === MIN_RELEVANCE` on a demoted RSS 13F
+  notice, and `BOILERPLATE_DEMOTION_FACTOR`'s docstring now documents the four-constant coupling.
+  Fixed.
+- *NSA3-I2 (index state).* Both files corrected — see item 3.
+
+**2. New tests fail without their mechanism (mutation spot-check).** Two mutations in a throwaway
+worktree, tracked tree never touched:
+- Revert per-field banding → **5 failures**. Pinned.
+- Make the actor anchor optional → **1 failure**. Pinned, though by a single test.
+
+*On whether the suite is now trustworthy — the systemic question.* Three consecutive iterations
+found a test-quality defect, so the pattern deserves an answer rather than a shrug. My read: the
+suite is now trustworthy **for the mechanisms it pins**, and the underlying cause has been correctly
+diagnosed and written down. All three defects share one root — *an assertion satisfiable by a
+mechanism other than the one under test* (threshold assertions satisfiable by admission; `< 1.0`
+satisfiable by demotion; a tautology satisfiable by itself). The fix pass addressed the root, not
+just the instance: assertions are now exact equalities on inputs chosen so no second mechanism is in
+play, and AGENT.md now carries an explicit rule ("if you add a test for this scorer, verify it can
+fail — revert the mechanism it claims to guard in a throwaway worktree"). The fix pass also audited
+the branch's other new test files for the same weakness and found none, which I spot-confirmed.
+
+That said, NSA4-I1 shows the residual limit of test-based confidence here: the Berkshire test passes
+while testing a shape that does not occur in the wild. The masking problem is solved; **input
+realism** is the remaining gap, and it is not something mutation testing detects. That is a
+narrower, more tractable concern than the previous three — I do not think it warrants a further
+process finding beyond the AGENT.md rule already added, but it is why I recommend fixing the test at
+`:380` rather than only adding new cases alongside it.
+
+**3. Index files accurate.** `plans/INDEX.md` → `in review`; `reviews/INDEX.md` → `in review` with an
+accurate three-iteration history; the review file's own stamp correction is intact and the premature
+`Status: IMPLEMENTED` has not crept back. All correct, except the test-count slip in NSA4-S1.
+
+**4. Score spread — iteration 3's structural judgement still holds, and the signal is adequate.**
+Confirmed: RSS items are title-only and self-tag `symbols`, so the only reachable values are
+`0.5 + 0.3 = 0.80` undemoted and `0.40` demoted; `1.00` needs a summary/content match no RSS item
+carries. Two values is structural, not a scoring defect. On adequacy against the sort's gap rule —
+`news.service.ts:128` prefers relevance only when `Math.abs(relevanceDiff) > 0.1`, and the
+0.40↔0.80 gap is **0.40**, four times the threshold. So demoted boilerplate is reliably sorted below
+real coverage, which is exactly what the regression required; within each band the tiebreak falls to
+recency, which is the intended behaviour. The ranking signal is sufficient. (Yahoo-sourced articles
+do carry summaries and reach the intermediate values, so the two-value lattice is an RSS-path
+property, not a whole-pipeline one.)
+
+**5. No regression to confirmed-good outcomes.** The range touches exactly one source file, and only
+its boilerplate-pattern constants and comments — `deriveMatchTokens`, `tickerCreditsSymbol`,
+`stripExchangeSuffix`, the field bands, and `MIN_RELEVANCE` are all byte-identical to `b468606f`.
+`news.service.ts`, `sentiment.service.ts`, `gemini.ts`, and `research-scores.ts` are untouched in
+this range. Retrieval volume, the 9.6→5.0 headline calibration, keyless operation, `.BR` tickers,
+and the refresh latch therefore cannot have regressed; 377/377 green confirms it.
+
+**6. NSA-Q1 untouched.** Confirmed — `MAX_ANALYZE_PER_PASS` (10) and `MAX_ARTICLES_PER_FETCH` (20)
+are unchanged in this range. Correctly left as the owner's call at merge time. Not re-litigated here.
+
+## Proposed DECISIONS.md entries (iteration 4)
+
+None. ADR-36's amendment already records the actor-anchor tightening accurately, including the
+recall-for-precision tradeoff — and it even anticipates the direction-1 miss class ("a genuinely
+institutional actor whose name doesn't happen to carry a recognized suffix is no longer demoted").
+NSA4-I1 is a refinement of that same mechanism, not a new decision: if fixed as recommended, extend
+ADR-36's amendment with the requested-company exclusion rather than opening a new ADR. Note that
+ADR-36's Tradeoffs paragraph does *not* currently mention the direction-2 false positive; if the
+owner instead chooses to accept it, that paragraph needs updating to say so.
