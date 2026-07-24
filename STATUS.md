@@ -1,7 +1,9 @@
 # STATUS.md
 
 ## In progress
-Plan: plans/2026-07-24-news-sentiment-accuracy.md — implemented, awaiting owner merge of PR #36
+Plan: plans/2026-07-24-news-sentiment-accuracy.md
+Branch: feature/news-sentiment-accuracy · PR #36 (do not merge — regression found in manual checks)
+Coding agent: running (relevance-scorer saturation fix)
 Open: NSA-Q1 (analyse-cap tuning) — reviews/2026-07-24-news-sentiment-accuracy.md
 
 ## Blocked
