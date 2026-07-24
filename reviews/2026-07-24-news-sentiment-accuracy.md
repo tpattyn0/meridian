@@ -1,14 +1,23 @@
 # Review: News & sentiment — retrieval coverage and scoring accuracy
 Date: 2026-07-24
-Status: IMPLEMENTED — 2026-07-24
+Status: (not implemented — iteration 3 open; see below)
+
+> **Stamp correction, iteration 3.** This file was stamped `Status: IMPLEMENTED — 2026-07-24`
+> after iteration 2. That stamp was premature: the owner's manual checks against live data
+> subsequently found a retrieval regression (relevance-score saturation → 13F boilerplate
+> dominance) that both prior iterations missed, and iteration 3's review of the fix pass raises a
+> further ISSUE plus an open QUESTION. The stamp is removed here per the Reviewer's ownership of
+> this file; the Coding agent / orchestrator re-stamps it when the file is genuinely clean.
+> `reviews/INDEX.md` and `plans/INDEX.md` carry the same premature state — see NSA3-I2.
 
 Branch: `feature/news-sentiment-accuracy` · PR https://github.com/tpattyn0/meridian/pull/36
 Plan: `plans/2026-07-24-news-sentiment-accuracy.md` (all 14 tasks, 0-13)
 
-**This file covers two review iterations.** Iteration 1 (below) reviewed `main...39a6910f`.
-Iteration 2 (`## Iteration 2` at the bottom) reviewed the fix pass, `3a108f29..41c9efd9`.
-Iteration 1's findings are retained verbatim as the record of what was raised; their
-resolution status is recorded in Iteration 2.
+**This file covers three review iterations.** Iteration 1 (below) reviewed `main...39a6910f`.
+Iteration 2 (`# Iteration 2`) reviewed the fix pass, `3a108f29..41c9efd9`.
+Iteration 3 (`# Iteration 3`, at the bottom) reviewed the saturation-regression fix pass,
+`211b0b3c..b468606f`. Earlier iterations' findings are retained verbatim as the record of what was
+raised; their resolution status is recorded in the iteration that verified them.
 
 ---
 
@@ -531,3 +540,311 @@ the natural place to settle it.
 None. ADR-35 was added by the fix pass, is `Status: accepted`, and its evidence paths all resolve
 to code that exists at HEAD — it accurately records the decision iteration 1 proposed. No new
 ADRs are required from this iteration; NSA2-I1 is a documentation correction, not a decision.
+
+---
+
+# Iteration 3
+
+Date: 2026-07-24
+Branch HEAD reviewed: `b468606f`
+Diff reviewed: `git diff 211b0b3c..b468606f` — 6 files, +259 / -9 (the regression fix pass, commit
+`0a6cf35b`, plus the orchestrator's `STATUS.md` bumps `f3415e29`/`b468606f`)
+
+**Security-pass note (unchanged rationale, third time).** The `security-review` skill diffs the
+*working tree against HEAD*; this branch is fully committed, so that diff is empty and the skill
+has no meaningful input. Per CLAUDE.md's Reviewer Step 1 carve-out the skill was skipped and the
+security pass run manually against `211b0b3c..HEAD` — see "Security pass" below.
+
+## Summary
+Findings: 0 BLOCKERs, 2 ISSUEs, 1 SUGGESTION, 2 QUESTIONs
+Requires owner decision: NSA-Q1 (carried forward, still open), NSA3-Q1 (boilerplate-demotion
+false-positive breadth — a product/precision call, not a code defect)
+Ready for Coding agent: NSA3-I1, NSA3-I2, NSA3-S1
+
+Verification run live this session: `npm run verify` — **pass** (typecheck ok · lint ok ·
+**372/372 tests** · gitleaks `no leaks found`). Working tree clean at review time
+(`git status --porcelain` empty, verified after `git fetch --prune`); branch pushed and level with
+`origin/feature/news-sentiment-accuracy`.
+
+**Overall judgement: the production fix is correct and the reported regression is genuinely
+closed — but the new tests do not close the class of gap that let it through, and the boilerplate
+patterns are materially broader than their own documentation claims.**
+
+The saturation diagnosis is right and the structural fix (one match-or-not check per field,
+replacing per-token accumulation) is the correct shape — it removes the defect by construction
+rather than by retuning a threshold. The junk-token fix is correct and pinned by a test that
+genuinely fails when reverted. Scope is tight: only the scorer, its tests, and four doc files
+moved; nothing else in the diff, so the confirmed-good outcomes (26-article retrieval, 5.0
+headline score, keyless operation, `.BR` tickers, refresh latch, calibration) are untouched by
+construction and remain as the owner measured them.
+
+Two things did not land as claimed. First — and this is the finding that matters, because it is
+the *same* class of failure the task asked me to judge — **I mutation-tested the new suite and the
+saturation fix itself is still unpinned.** Reverting `scoreRelevance` to the exact pre-fix
+per-token accumulation loop leaves all 23 relevance tests green (NSA3-I1). The two tests written
+specifically to catch saturation are both satisfied by the *boilerplate demotion* alone, so the
+demotion masks the root-cause fix in exactly the way the old threshold-only tests masked the
+original defect. Second, the boilerplate patterns catch a substantial set of genuine headlines —
+insider sales, index rebalances, and any narrative sentence of the form "X trims stake in Y" —
+which the code comment explicitly promises they will not (NSA3-Q1).
+
+Judgements on the five items the task asked me to verify specifically are in "Directed
+verification" below.
+
+## Directed verification (the five items requested)
+
+**1. Boilerplate patterns vs. genuine news — partially fails. See NSA3-Q1.**
+The owner's spot-check is confirmed: "Alphabet Announces $70 Billion Share Buyback Program" scores
+`0.80`, undemoted. But probing 20 constructed real-headline shapes found **12 false positives**,
+almost all from pattern 3 (`boosts|grows|trims|cuts|reduces|raises|lowers|increases|decreases`
++ `position|holdings|stake` + `in|by`), which has **no institutional-actor anchor at all** despite
+the code comment claiming it matches "an institutional/fund-sounding actor name combined with a
+holdings verb and a share/stake noun". Measured, all demoted from `0.80` to `0.40`:
+
+| Headline | Demoted to |
+|---|---|
+| `SoftBank trims stake in Alphabet to fund AI buildout` | 0.40 |
+| `Alphabet reduces stake in Chinese AI venture amid regulatory pressure` | 0.40 |
+| `Nvidia cuts holdings in Arm Holdings, filing shows` | 0.40 |
+| `Alphabet boosts its stake in Anthropic` | 0.40 |
+| `Alphabet Raises Its Position in AI Infrastructure Spending` | 0.40 |
+| `S&P 500 index raises its position in tech names after rebalance` | 0.40 |
+| `Alphabet Shares Sold by Insiders Ahead of Earnings` (pattern 2) | 0.40 |
+| `Alphabet shares sold by CEO Sundar Pichai under 10b5-1 plan` (pattern 2) | 0.40 |
+| `Alphabet insider sells 4,000 shares of stock` (pattern 1) | 0.40 |
+| `Berkshire Hathaway Buys 5,000,000 Shares of Alphabet` (pattern 1) | 0.40 |
+
+The first three are ordinary market-moving corporate-action reporting; "SoftBank trims stake in
+Alphabet" is genuinely the kind of story a sentiment feed should rank highly. Insider transactions
+(pattern 2) and a notable-investor position change (pattern 1, Berkshire) are also real news that
+this pattern set cannot distinguish from a MarketBeat 13F notice by title shape alone. Buybacks,
+secondary offerings, and acquisitions are safe — those all passed clean. This is a precision
+tradeoff the owner should rule on rather than a defect I can score alone, hence QUESTION not ISSUE.
+
+**2. Score spread — still coarse, and structurally so. See NSA3-S1.** Not a latent repeat of the
+same defect, but for a narrower reason than the fix's own documentation gives. Enumerating the
+full reachable lattice: with the four flat bands (0.5/0.2/0.1/0.3) and the ×0.5 demotion, only
+nine distinct values are `>= MIN_RELEVANCE` (`0.4, 0.45, 0.5, 0.55, 0.6, 0.7, 0.8, 0.9, 1.0`). In
+practice the Google News RSS path self-tags `symbols: [symbol]` unconditionally
+(`news.service.ts:265`) and RSS items are title-only (no summary/content), so **every** RSS
+article collapses to exactly one of `0.5+0.3 = 0.80` (undemoted) or `0.40` (demoted) — which is
+precisely the 1.00/0.80 two-value split the owner measured, one band lower. The `0.4` gap between
+them clears the sort's `0.1` threshold cleanly, so ordering is real and the demoted set genuinely
+sinks. The residual risk is different from the original defect: it is not that boilerplate ties
+with real news (it no longer does), but that **within** the undemoted 0.80 tier the sort is again
+pure recency, so a high-volume publisher whose phrasing escapes the patterns can still crowd the
+list. That is a ranking-resolution limitation worth recording, not a blocker.
+
+**3. TD-42 (off-topic articles) — deferring is defensible and the record is accurate.** Confirmed:
+"Why Nvidia Stock Isn't Rallying as It Should After Alphabet Earnings" scores `0.80` for GOOGL,
+identical to genuine Alphabet coverage. TD-42's stated root cause is exactly right on both legs
+(the "alphabet" token match plus the RSS fetcher's unconditional `symbols: [symbol]` self-tag at
+`news.service.ts:265`), and the "no snippet — RSS items are title-only" premise checks out against
+`fetchGoogleNewsRSS`, which sets no `summary`/`content`. The deferral reasoning is sound: any
+title-only heuristic that suppresses this would need to know the *other* company's name, and the
+naive version (drop titles mentioning a second ticker) would kill legitimate comparative coverage —
+the plan's own "Tesla, Alphabet lose hundreds of billions" case is exactly that shape. Severity
+`Low` is right given it inflates relevance rather than suppressing real news, and the entry even
+volunteers the related `Barco`/`Barcola` proper-noun collision unprompted. No action.
+
+**4. `BOILERPLATE_DEMOTION_FACTOR = 0.5` landing demoted items at exactly `MIN_RELEVANCE` — an
+undocumented accident, not a deliberate design. See NSA3-I1's companion, NSA3-S1.** The arithmetic
+is `(0.5 + 0.3) × 0.5 = 0.40`, exactly `MIN_RELEVANCE`, retained only because comparisons use `>=`.
+Nothing in ADR-36, AGENT.md, or the code comments notes this coincidence, and it is genuinely
+fragile: the stated design intent is "demoted, **not discarded** — these are technically on-topic",
+yet lowering the factor to `0.49`, raising `MIN_RELEVANCE` to `0.41`, or trimming
+`SYMBOLS_MATCH_SCORE` by `0.01` silently converts every demoted 13F notice from *retained* to
+*filtered out*. The behavior isn't wrong today — and the one test covering it
+(`"still clears MIN_RELEVANCE (demoted, not discarded)"`) does assert `>= MIN_RELEVANCE`, so a
+future constant change would at least fail that test rather than shipping silently. But the
+boundary is load-bearing and undocumented, which is what makes it worth flagging. Folded into
+NSA3-S1 as a doc/comment fix rather than a separate finding, since the test already guards it.
+
+**5. No regression to confirmed-good outcomes — confirmed.** `git diff --stat 211b0b3c..b468606f`
+shows exactly six files: `lib/utils/news-relevance.ts`, `lib/utils/news-relevance.test.ts`,
+`AGENT.md`, `DECISIONS.md`, `TECH_DEBT.md`, `STATUS.md`. `news.service.ts`, `sentiment.service.ts`,
+`gemini.ts`, `research-scores.ts`, `news-feed.tsx`, `overview.tsx`, and `wishlist.service.ts` are
+all untouched, so retrieval volume, the headline-score pipeline (ADR-35's `computeSentimentScore`),
+keyless operation, `.BR` ticker handling, and the refresh latch cannot have moved. Full suite
+372/372 (was 363, +9 new — matches the reported count). The one behavioral shift within the
+scorer's own contract: every article's absolute score drops by one band (an RSS-sourced real story
+that was `1.00` is now `0.80`), which changes no filtering outcome (`0.80 >= 0.4`) and no ordering
+among undemoted items. The five all-caps GOOGL/`.BR`/threshold cases from the iteration-1 test
+block still pass unchanged.
+
+## Security pass
+
+Manual, against `211b0b3c..HEAD`. No new attack surface: the diff adds no I/O, no auth-touching
+code, no persistence, and no new dependency. Specifics checked:
+
+- **ReDoS on the four new `BOILERPLATE_TITLE_PATTERNS`** — the real question, since these run over
+  attacker-influenced text (third-party RSS titles) on every scored article. All four are linear:
+  no nested quantifiers, no ambiguous alternation under a quantifier. The only repetition is
+  `[\d,.]+` bounded by a required literal on both sides. Timed against a 100k-character
+  adversarial title: sub-millisecond, no backtracking blowup.
+- **`escapeRegExp` still applied** to every derived token before `new RegExp` in
+  `matchesWordBoundary` — the widened `/[,.\s]+$/` trim changes token *content*, not the escaping
+  path, so no token-injection regression. The four boilerplate patterns are static literals, never
+  interpolated from input.
+- **No secrets**: `gitleaks` clean; the diff's `api_key`/`token` grep hits are all prose in
+  AGENT.md/DECISIONS.md/TECH_DEBT.md.
+- **No unbounded work**: the scorer is called once per article over an already-capped
+  (`MAX_ARTICLES_PER_FETCH = 20`, post-dedup) list; the demotion adds four regex tests per article.
+- **Prompt-injection surface unchanged** — nothing here alters what reaches Gemini.
+
+## Findings
+
+### NSA3-I1 — ISSUE
+**File:** `lib/utils/news-relevance.test.ts:144-190` (the two saturation tests)
+
+**Problem:** The new tests do not pin the saturation fix — the actual root cause of the regression.
+I verified this by mutation testing in a throwaway git worktree at HEAD: reverting `scoreRelevance`
+to the exact pre-fix per-token accumulation loop (keeping the demotion and the token fix in place)
+leaves **all 23 relevance tests green**. The suite's own protection against the defect it was
+written for is zero. For contrast, the other three mutations I ran are all caught:
+`BOILERPLATE_DEMOTION_FACTOR` → `1.0` fails 4 tests, → `0.9` fails 1, and reverting the
+trailing-punctuation trim fails 1. So the boilerplate and token fixes are pinned; the saturation
+fix is not.
+
+The mechanism is the same masking pattern the task asked me to watch for, one level up. Both
+saturation tests happen to be satisfied by the demotion alone:
+
+- `"does not stack per-token matches within the same field to the 1.0 ceiling"` asserts
+  `score < 1.0` — but its subject is `"Nwam LLC Buys 8,055 Shares of Alphabet Inc. $GOOGL"`, a
+  *boilerplate* title. Under the reverted scorer it computes `1.0 × 0.5 = 0.65` (it saturates,
+  then the demotion pulls it back), so `< 1.0` holds and the test passes while the very stacking
+  it names is happening. Its subject must be a **non**-boilerplate multi-token title, where the
+  demotion cannot rescue the assertion.
+- `"scores spread across the range rather than piling at 1.00"` asserts only
+  `distinctValues.size > 1`. Under the reverted scorer the set is `{0.65, 0.80, 1.00}` — size 3,
+  passes. A `> 1` distinctness check is nearly unfalsifiable once any demotion exists.
+
+The ranking assertions (`cnbcSelloff > marketBeat13F`, gap `> 0.1`) are the right *shape* of test
+and are a genuine improvement over the old threshold-only ones — but they too survive the revert,
+because the demotion alone produces `0.80` vs `0.65`, still a `0.15` gap. They pin "boilerplate
+ranks below real news" without pinning "scores don't saturate," which are two independent
+properties that this fix pass happened to address together.
+
+**Recommendation:** Add assertions that fail when per-token accumulation returns, targeting the
+property directly rather than a downstream consequence:
+1. Retarget the stacking test at a non-boilerplate title containing both the ticker and
+   company-core tokens, e.g. `scoreRelevance({ title: "Alphabet (GOOGL) slides on earnings" },
+   "GOOGL", "Alphabet Inc.")` — assert it equals `TITLE_MATCH_SCORE` exactly (`0.5`), not merely
+   `< 1.0`. Under per-token accumulation this is `1.0`; exact-equality makes the flat-band contract
+   the assertion rather than a bound the demotion can satisfy.
+2. Add a direct multi-token-invariance test: a title matching **one** token and a title matching
+   **three** tokens, same field, same everything else, must score **identically**. That is the
+   flat-band contract stated as an equality, and no demotion can mask it.
+3. Replace `distinctValues.size > 1` with an assertion on the actual expected lattice — e.g. that
+   the measured set is exactly `{0.40, 0.80}` — so a change in banding is visible rather than
+   absorbed.
+4. Consider running the same revert-mutation once after the new assertions land, to confirm they
+   actually fail. That is the check this iteration performed and the one that distinguishes a test
+   that pins behavior from one that describes it.
+
+### NSA3-I2 — ISSUE
+**File:** `reviews/INDEX.md:5`, `plans/INDEX.md:32`, and this file's header (header already
+corrected in this commit)
+
+**Problem:** Both index files still record this work as complete, which is now false and is the
+state a future session would read first. `reviews/INDEX.md` row 5 says
+`IMPLEMENTED — 2026-07-24 (2 iterations; …; verify 363/363)`, and `plans/INDEX.md:32` sets the plan
+to `implemented` with this review as its gate. Per CLAUDE.md, a plan is `implemented` only when the
+review carries `Status: IMPLEMENTED`; iteration 3 has open findings, so neither is true. The
+premature stamp is understandable — iteration 2 closed clean and the regression was found by the
+owner afterwards, out of band — but leaving it means the next session sees "done" for work with an
+open ISSUE and two open QUESTIONs.
+
+**Recommendation:** Set `plans/INDEX.md:32` back to `in review` (leaving the `Review` column
+pointing at this file). Update the `reviews/INDEX.md` row to blank/`in review` status, noting three
+iterations and the iteration-3 regression. Both should be re-stamped together with this file's
+header when iteration 3's findings are closed — the same commit, per the Coding agent's
+review-is-the-gate rule.
+
+### NSA3-S1 — SUGGESTION
+**File:** `lib/utils/news-relevance.ts:172-176`, `:192-193`; `DECISIONS.md` ADR-36 Tradeoffs
+
+**Problem:** Three documentation claims in this fix pass are inaccurate or incomplete against the
+code as written. None changes behavior, but each would mislead the next person to touch this file —
+which AGENT.md now explicitly designates a fragile surface.
+
+1. **The pattern-set comment overstates the matching narrowness.** It says matching is on "an
+   institutional/fund-sounding actor name combined with a holdings verb and a share/stake noun."
+   No pattern tests for an actor name at all; pattern 3 in particular is a bare verb+noun+preposition
+   match, which is why "SoftBank trims stake in Alphabet" and "S&P 500 index raises its position in
+   tech names" are caught (see NSA3-Q1).
+2. **ADR-36's Tradeoffs paragraph describes the post-fix clustering as `0.5`/`0.8`/`1.0`.** For the
+   RSS path — the volume source, and the one this whole regression was about — the reachable values
+   are `0.40` and `0.80` only, because RSS items are title-only and self-tag `symbols`. `1.0` is
+   unreachable without a summary or content match, which no RSS article has.
+3. **The `MIN_RELEVANCE` boundary coincidence is unrecorded.** A demoted article lands at exactly
+   `0.40 == MIN_RELEVANCE` and survives only because the comparison is `>=` (directed-verification
+   item 4). The stated intent is "demoted, not discarded," but a one-hundredth change to either
+   constant flips that.
+
+**Recommendation:** Reword the pattern comment to describe what the regexes actually match (holdings
+verb + share/stake noun phrasing, no actor anchor) and note the known false-positive shapes. Correct
+ADR-36's clustering figures to `0.40`/`0.80` for the RSS path, keeping the full lattice as the
+general case. Add one line at `BOILERPLATE_DEMOTION_FACTOR`'s declaration recording that
+`(TITLE + SYMBOLS) × FACTOR` lands exactly on `MIN_RELEVANCE` and that retention depends on the
+`>=` comparison — so the coupling is visible at the point of change.
+
+### NSA3-Q1 — QUESTION
+**File:** `lib/utils/news-relevance.ts:177-190`
+
+**Problem:** The boilerplate patterns demote a meaningful set of genuine headlines, not just 13F
+notices — 12 false positives across 20 probed real-headline shapes (table in directed-verification
+item 1). Three categories are affected:
+
+- **Corporate-action narrative** — "SoftBank trims stake in Alphabet to fund AI buildout",
+  "Alphabet reduces stake in Chinese AI venture amid regulatory pressure", "Nvidia cuts holdings in
+  Arm Holdings". These are real, often market-moving stories, and the first is squarely the kind of
+  coverage a GOOGL sentiment feed should rank *up*.
+- **Insider transactions** — "Alphabet shares sold by CEO Sundar Pichai under 10b5-1 plan". A real
+  signal, structurally indistinguishable from "Shares Sold by Bryn Mawr Trust Advisors LLC" by
+  title shape.
+- **Index/notable-investor changes** — "S&P 500 index raises its position in tech names after
+  rebalance", "Berkshire Hathaway Buys 5,000,000 Shares of Alphabet".
+
+The task framing was right that "a pattern that silently drops real news is worse than the
+boilerplate it removes." The mitigating facts: these are **demoted, not dropped** (`0.40`, still
+`>= MIN_RELEVANCE`, so they remain in the pool and are still sentiment-scored), and they are only
+outranked by, not excluded in favour of, undemoted coverage. The cost lands only when the 20-slot
+cap binds. Against that, the regression this fixes was severe and measured on live data, and the
+patterns demonstrably eliminated it (12/20 → 0/20). This is a precision/recall balance on
+heuristics over an unversioned third-party feed — a product call about which error the owner
+prefers, not something a reviewer should silently retune.
+
+**Recommendation:** Owner picks one:
+- **(a) Accept as-is and merge.** Demotion is soft, the dominant real-world case is solved, and the
+  false-positive set is mostly a *ranking* penalty on stories that stay visible. Revisit if the live
+  feed shows a real story pushed off the list. Lowest risk of re-breaking what was just fixed.
+- **(b) Narrow pattern 3 before merge** by requiring an institutional-actor cue — a preceding
+  `LLC|LP|Inc|Trust|Advisors|Capital|Management|Partners|Group|Wealth|Asset` token, or the
+  `13F`/`SEC filing` phrasing — which is what the comment already claims and would clear most of
+  the corporate-action false positives while keeping the MarketBeat shapes. Costs a re-verification
+  pass against live GOOGL data.
+- **(c) Defer to TD-42's scope** and log the false-positive breadth as its own debt row, treating
+  precision tuning as follow-up work once live output has been observed for a while.
+
+My read: **(b) if a live re-verification pass is cheap, otherwise (a)** — the false positives are
+real but soft, and the option with the worst expected outcome is widening the patterns further
+without live data to check against.
+
+### NSA-Q1 — QUESTION (carried forward from iterations 1 and 2, still open)
+
+Unchanged and still unresolved: `MAX_ANALYZE_PER_PASS` (10) versus `MAX_ARTICLES_PER_FETCH` (20)
+means a heavily-covered symbol accumulates PENDING rows that never affect the headline score. The
+iteration-2 analysis (above) stands in full; nothing in this fix pass touches
+`sentiment.service.ts` or the cap constants. Worth noting the owner's live run has now partly
+answered the empirical half of it — the manual checks confirmed the retrieval and scoring outcomes
+the cap interacts with — so this is now purely the throughput/batch-size tuning decision, ready to
+settle at merge time.
+
+## Proposed DECISIONS.md entries (iteration 3)
+
+None. ADR-36 was added by the fix pass, is `Status: accepted`, and its Decision/Evidence sections
+accurately describe the code at HEAD (the Tradeoffs paragraph needs the numeric correction in
+NSA3-S1, which is a factual fix to an existing ADR, not a new decision). If the owner chooses
+NSA3-Q1 option (b), the narrowed pattern set is a refinement of ADR-36's mechanism and should be
+recorded as an amendment to ADR-36 rather than a new ADR.
