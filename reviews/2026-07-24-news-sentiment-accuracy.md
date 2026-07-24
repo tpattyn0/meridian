@@ -1,6 +1,6 @@
 # Review: News & sentiment — retrieval coverage and scoring accuracy
 Date: 2026-07-24
-Status: (not implemented — iteration 4 open; see below)
+Status: IMPLEMENTED — 2026-07-24 (4 iterations; NSA4-I1/S1 fixed and mutation-verified; NSA-Q1 cap tuning remains open for the owner, and TD-42/TD-43 record consciously deferred residuals)
 
 > **Stamp correction, iteration 3.** This file was stamped `Status: IMPLEMENTED — 2026-07-24`
 > after iteration 2. That stamp was premature: the owner's manual checks against live data
