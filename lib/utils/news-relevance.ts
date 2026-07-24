@@ -157,7 +157,8 @@ const CONTENT_MATCH_SCORE = 0.1;
 const SYMBOLS_MATCH_SCORE = 0.3;
 
 /**
- * Boilerplate-title demotion (plan regression fix, review 2026-07-24).
+ * Boilerplate-title demotion (plan regression fix, review 2026-07-24;
+ * tightened, review iteration 3, NSA3-Q1 owner decision (b)).
  * Institutional-holdings / 13F filing-notice headlines ("Nwam LLC Buys
  * 8,055 Shares of Alphabet Inc. $GOOGL", "Alphabet Inc. $GOOGL Shares Sold
  * by Bryn Mawr Trust Advisors LLC", "Boosts Stock Position in...", "Grows
@@ -169,27 +170,76 @@ const SYMBOLS_MATCH_SCORE = 0.3;
  * by publishing volume once the saturation fix above stops them tying at
  * 1.0 with everything else.
  *
- * Matched narrowly on title *shape* (an institutional/fund-sounding actor
- * name combined with a holdings verb and a share/stake noun), not on the
- * mere presence of a share count or dollar figure — a headline like
+ * **Matching requires an institutional-actor anchor** — a preceding word
+ * (the "actor") immediately followed by one of `INSTITUTIONAL_ACTOR_SUFFIX`
+ * (LLC, LP, Inc., Trust, Advisors, Management, Capital, Partners, Group,
+ * Wealth, Asset (Management), Retirement System, Bank, Bancorp, Financial,
+ * Investments, Holdings, Fund, Co., S.A.) — combined with the holdings verb
+ * and share/stake noun. The original version of this pattern set matched on
+ * the verb+noun phrasing alone with no actor anchor at all, despite this
+ * comment already claiming the narrower match: it silently demoted genuine
+ * corporate-action, insider-transaction, and index-rebalance headlines with
+ * no institutional-filing shape ("SoftBank trims stake in Alphabet to fund
+ * AI buildout", "Alphabet shares sold by CEO Sundar Pichai under 10b5-1
+ * plan", "S&P 500 index raises its position in tech names after rebalance")
+ * — measured 12 false positives across 20 probed real-headline shapes
+ * (review iteration 3, NSA3-Q1). The actor-suffix anchor is what actually
+ * narrows the match to the 13F filing-notice shape; a bare share count or
+ * dollar figure is still not sufficient on its own — a headline like
  * "Company raises 2025 guidance, adds 500 jobs" must not be caught by this.
  */
+const INSTITUTIONAL_ACTOR_SUFFIX =
+  "(?:LLC|LP|L\\.P\\.|Inc\\.?|Trust|Advisors|Advisers|Management|Capital|Partners|Group|Wealth|Asset(?:\\sManagement)?|Retirement\\sSystem|Bank|Bancorp|Financial|Investments?|Holdings?|Fund|Co\\.?|S\\.?A\\.?)";
+/** Up to 5 words of actor name preceding the institutional-actor suffix. */
+const ACTOR_NAME = "\\w+(?:\\s\\w+){0,4}\\s" + INSTITUTIONAL_ACTOR_SUFFIX;
+
 const BOILERPLATE_TITLE_PATTERNS: RegExp[] = [
-  // "X (LLC|Inc|Trust|Advisors|Group|Capital|Management|...) Buys/Sells/Acquires/Purchases
-  // N Shares of ..." — the share count can appear either before "Shares"
-  // ("Buys 8,055 Shares of") or after "Shares of" ("Acquires Shares of
-  // 4,494 Alphabet Inc.", the live MarketBeat variant that motivated
-  // widening this from a single fixed word order).
-  /\b(buys|sells|acquires|purchases)\s([\d,.]+\s(shares|stake)\s(of|in)|shares\sof\s[\d,.]+)\b/i,
-  // "... Shares Sold by X" / "... Shares Bought by X" / "... Shares Acquired by X"
-  /\bshares\s(sold|bought|acquired|purchased)\sby\b/i,
-  // "Boosts/Grows/Trims/Cuts/Reduces/Raises/Lowers Stock Position in/Stake in ..."
-  /\b(boosts|grows|trims|cuts|reduces|raises|lowers|increases|decreases)\s(its\s)?(stock\s)?(position|holdings|stake)\s(in|by)\b/i,
-  // "Has $N (Million|Billion) Stake in ..." / "Holds $N Million Position in ..."
-  /\bhas\s\$[\d,.]+\s(million|billion|thousand)\s(stake|position|holdings)\s(in|of)\b/i,
+  // "<Actor> <SUFFIX> Buys/Sells/Acquires/Purchases N Shares of ..." — the
+  // share count can appear either before "Shares" ("Buys 8,055 Shares of")
+  // or after "Shares of" ("Acquires Shares of 4,494 Alphabet Inc.", the live
+  // MarketBeat variant that motivated widening this from a single fixed
+  // word order).
+  new RegExp(
+    `\\b${ACTOR_NAME}\\s(buys|sells|acquires|purchases)\\s([\\d,.]+\\s(shares|stake)\\s(of|in)|shares\\sof\\s[\\d,.]+)\\b`,
+    "i"
+  ),
+  // "... Shares Sold/Bought/Acquired/Purchased by <Actor> <SUFFIX>"
+  new RegExp(
+    `\\bshares\\s(sold|bought|acquired|purchased)\\sby\\s${ACTOR_NAME}\\b`,
+    "i"
+  ),
+  // "<Actor> <SUFFIX> Boosts/Grows/Trims/Cuts/Reduces/Raises/Lowers Stock
+  // Position in/Stake in ..." — the actor-suffix anchor is what excludes
+  // "SoftBank trims stake in Alphabet" (no suffix) while still catching
+  // "Meridian Capital Boosts Stock Position in Alphabet Inc." (has one).
+  new RegExp(
+    `\\b${ACTOR_NAME}\\s(boosts|grows|trims|cuts|reduces|raises|lowers|increases|decreases)\\s(its\\s)?(stock\\s)?(position|holdings|stake)\\s(in|by)\\b`,
+    "i"
+  ),
+  // "<Actor> <SUFFIX> Has $N (Million|Billion) Stake in ..." / "Holds $N
+  // Million Position in ..."
+  new RegExp(
+    `\\b${ACTOR_NAME}\\shas\\s\\$[\\d,.]+\\s(million|billion|thousand)\\s(stake|position|holdings)\\s(in|of)\\b`,
+    "i"
+  ),
 ];
 
-/** Multiplier applied to the whole score when the title matches a boilerplate 13F-style shape. */
+/**
+ * Multiplier applied to the whole score when the title matches a boilerplate
+ * 13F-style shape. **Coupled with `MIN_RELEVANCE` and the field-match
+ * bands, not independent:** `(TITLE_MATCH_SCORE + SYMBOLS_MATCH_SCORE) *
+ * BOILERPLATE_DEMOTION_FACTOR = (0.5 + 0.3) * 0.5 = 0.40`, which lands
+ * exactly on `MIN_RELEVANCE = 0.4` — a demoted RSS-sourced 13F notice
+ * survives only because `scoreRelevance` comparisons use `>=`. The stated
+ * design intent is "demoted, not discarded"; a one-hundredth change to
+ * either `BOILERPLATE_DEMOTION_FACTOR` or `MIN_RELEVANCE` (or a `-0.01` to
+ * `SYMBOLS_MATCH_SCORE`/`TITLE_MATCH_SCORE`) silently flips every demoted
+ * 13F notice from retained to filtered out. If you change any of these
+ * constants, recompute this product and confirm it still clears
+ * `MIN_RELEVANCE` deliberately — `news-relevance.test.ts`'s
+ * "MIN_RELEVANCE / demotion-factor coupling" test fails loudly if the
+ * relationship drifts (NSA3-S1).
+ */
 const BOILERPLATE_DEMOTION_FACTOR = 0.5;
 
 function isBoilerplateFilingTitle(title: string): boolean {

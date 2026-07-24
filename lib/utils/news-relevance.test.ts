@@ -159,6 +159,50 @@ describe("scoreRelevance — saturation fix (regression, review 2026-07-24 manua
     expect(score).toBeLessThan(1.0);
   });
 
+  it("does not stack per-token matches to the title band, pinned on a NON-boilerplate title (NSA3-I1)", () => {
+    // The test above uses a boilerplate title, so its `< 1.0` assertion is
+    // satisfied by the boilerplate demotion alone (1.0 * 0.5 = 0.65) even if
+    // the underlying per-field accumulation regresses back to per-token
+    // stacking — the demotion masks the saturation fix exactly as the old
+    // threshold-only tests masked the original defect (review iteration 3,
+    // NSA3-I1). This title matches BOTH the ticker token ("googl") and the
+    // company-core token ("alphabet") in the title field but has no
+    // boilerplate shape at all, so nothing can rescue the assertion: under
+    // per-token accumulation the title field alone would score
+    // 0.5 + 0.5 = 1.0; under the flat per-field band it must score exactly
+    // TITLE_MATCH_SCORE (0.5), regardless of how many tokens matched.
+    const score = scoreRelevance(
+      { title: "Alphabet (GOOGL) slides on earnings" },
+      symbol,
+      companyName
+    );
+    expect(score).toBe(0.5);
+  });
+
+  it("a title matching one token scores identically to a title matching multiple tokens in the same field (NSA3-I1)", () => {
+    // The decisive property of a per-field band, stated directly: matching
+    // more tokens in the same field must not increase the score. Neither
+    // title is boilerplate-shaped, so the demotion cannot equalize them by
+    // accident — this is the flat-band contract itself, not a downstream
+    // consequence of it.
+    const oneToken = scoreRelevance(
+      { title: "Alphabet slides on spending concerns" },
+      symbol,
+      companyName
+    );
+    const threeTokens = scoreRelevance(
+      // Matches "googl" (raw symbol), "alphabet" (company-core word), and
+      // "alphabet inc" is not a token, but "googl" + "alphabet" + the
+      // exchange-stripped symbol "googl" (same as raw here) still gives at
+      // least two independent tokens hitting the title in one field.
+      { title: "GOOGL: Alphabet Inc. shares slide on spending concerns" },
+      symbol,
+      companyName
+    );
+    expect(oneToken).toBe(threeTokens);
+    expect(oneToken).toBe(0.5);
+  });
+
   it("real reporting outranks a MarketBeat-style 13F filing notice for the same symbol (ranking assertion)", () => {
     // The core regression: threshold-only assertions (>= MIN_RELEVANCE) can't
     // catch saturation, because both of these clear the bar. What matters is
@@ -202,7 +246,17 @@ describe("scoreRelevance — saturation fix (regression, review 2026-07-24 manua
     expect(stockStory).toBeGreaterThan(marketBeat13F2);
   });
 
-  it("scores spread across the range rather than piling at 1.00 (measured live-headline set)", () => {
+  it("scores match the exact expected lattice rather than piling at 1.00 (measured live-headline set, NSA3-I1)", () => {
+    // Recommendation 3 (review iteration 3, NSA3-I1): a bare
+    // `distinctValues.size > 1` check is nearly unfalsifiable once any
+    // demotion exists in the pipeline — it is satisfied by the boilerplate
+    // demotion alone even if per-token accumulation regresses (the demoted
+    // set becomes {0.65, 1.00}, still size 2). Asserting the exact expected
+    // values makes a change in banding visible instead of absorbed: all five
+    // titles are RSS-shaped (title + self-tagged symbols only, no
+    // summary/content), so under the current flat-band scorer every one
+    // lands on exactly one of two reachable RSS values — 0.40 (demoted 13F
+    // shape) or 0.80 (undemoted title+symbols match).
     const measured: [string, string[]][] = [
       ["Nwam LLC Buys 8,055 Shares of Alphabet Inc. $GOOGL", ["GOOGL"]],
       ["Alphabet Inc. $GOOGL Shares Sold by Bryn Mawr Trust Advisors LLC", ["GOOGL"]],
@@ -213,11 +267,26 @@ describe("scoreRelevance — saturation fix (regression, review 2026-07-24 manua
     const scores = measured.map(([title, symbols]) =>
       scoreRelevance({ title, symbols }, symbol, companyName)
     );
-    const distinctValues = new Set(scores.map((s) => s.toFixed(2)));
-    // Pre-fix, every one of these ties at 1.00 (0 distinct values above the
-    // ceiling). Post-fix there must be real spread, not a single pile-up.
-    expect(distinctValues.size).toBeGreaterThan(1);
-    expect(scores.every((s) => s <= 1.0)).toBe(true);
+    expect(scores).toEqual([0.4, 0.4, 0.8, 0.8, 0.8]);
+    expect(new Set(scores).size).toBe(2);
+  });
+
+  it("MIN_RELEVANCE / demotion-factor coupling: a demoted RSS-sourced 13F notice lands at exactly MIN_RELEVANCE (NSA3-S1)", () => {
+    // (TITLE_MATCH_SCORE + SYMBOLS_MATCH_SCORE) * BOILERPLATE_DEMOTION_FACTOR
+    // = (0.5 + 0.3) * 0.5 = 0.40, which is exactly MIN_RELEVANCE — a
+    // deliberate-but-undocumented-until-now coincidence (review iteration 3,
+    // directed-verification item 4 / NSA3-S1). It survives filtering only
+    // because scoreRelevance's ingest comparison uses >=. This test pins the
+    // relationship directly: it fails loudly (not silently) if
+    // BOILERPLATE_DEMOTION_FACTOR, MIN_RELEVANCE, TITLE_MATCH_SCORE, or
+    // SYMBOLS_MATCH_SCORE drift out of this exact relationship.
+    const score = scoreRelevance(
+      { title: "Nwam LLC Buys 8,055 Shares of Alphabet Inc. $GOOGL", symbols: ["GOOGL"] },
+      symbol,
+      companyName
+    );
+    expect(score).toBe(MIN_RELEVANCE);
+    expect(score).toBe(0.4);
   });
 });
 
@@ -280,5 +349,58 @@ describe("scoreRelevance — 13F/institutional-holdings boilerplate demotion", (
       companyName
     );
     expect(score).toBe(0.5);
+  });
+
+  it("does not demote genuine corporate-action, insider-transaction, or index-rebalance headlines (NSA3-Q1, owner decision (b))", () => {
+    // Review iteration 3 measured 12 false positives across 20 probed
+    // real-headline shapes against the pre-tightening pattern set — all from
+    // the verb+noun patterns having no institutional-actor anchor. These are
+    // the exact headlines from that table (NSA3-Q1's Directed Verification
+    // item 1). None of them has an institutional-actor suffix (LLC, LP,
+    // Inc., Trust, Advisors, Management, Capital, Partners, Retirement
+    // System, Bank, ...) anchoring the actor name, so none should match the
+    // 13F filing-notice shape — they must score their full undemoted band,
+    // never the demoted (halved) version of it.
+    //
+    // Two of these titles ("Nvidia cuts holdings in Arm Holdings...", "S&P
+    // 500 index raises its position...") don't mention Alphabet/GOOGL in the
+    // title text at all, so they only earn the symbols bonus (0.3) even
+    // undemoted — included anyway because they were part of the review's
+    // false-positive table and must still not be halved to 0.15.
+    const expected: [string, number][] = [
+      ["SoftBank trims stake in Alphabet to fund AI buildout", 0.8],
+      ["Alphabet reduces stake in Chinese AI venture amid regulatory pressure", 0.8],
+      ["Nvidia cuts holdings in Arm Holdings, filing shows", 0.3],
+      ["Alphabet boosts its stake in Anthropic", 0.8],
+      ["Alphabet Raises Its Position in AI Infrastructure Spending", 0.8],
+      ["S&P 500 index raises its position in tech names after rebalance", 0.3],
+      ["Alphabet Shares Sold by Insiders Ahead of Earnings", 0.8],
+      ["Alphabet shares sold by CEO Sundar Pichai under 10b5-1 plan", 0.8],
+      ["Alphabet insider sells 4,000 shares of stock", 0.8],
+      ["Berkshire Hathaway Buys 5,000,000 Shares of Alphabet", 0.8],
+    ];
+    for (const [title, expectedScore] of expected) {
+      const score = scoreRelevance({ title, symbols: ["GOOGL"] }, symbol, companyName);
+      expect(score, title).toBe(expectedScore);
+    }
+  });
+
+  it("still demotes the true 13F filing-notice shapes after the actor-anchor tightening (NSA3-Q1)", () => {
+    // The other half of NSA3-Q1: tightening the patterns to require an
+    // institutional-actor anchor must not lose the true positives the
+    // demotion exists for. Same live-measured MarketBeat-style set as above,
+    // reproduced here with the actor-anchor requirement engaged.
+    const true13FShapes = [
+      "Nwam LLC Buys 8,055 Shares of Alphabet Inc. $GOOGL",
+      "Alphabet Inc. $GOOGL Shares Sold by Bryn Mawr Trust Advisors LLC",
+      "Meridian Capital Boosts Stock Position in Alphabet Inc. $GOOGL",
+      "Harbor Advisors Grows Stake in Alphabet Inc. $GOOGL",
+      "Elm Street Wealth Has $1.2 Million Stake in Alphabet Inc. $GOOGL",
+      "ABC Arbitrage SA Acquires Shares of 4,494 Alphabet Inc. $GOOGL",
+    ];
+    for (const title of true13FShapes) {
+      const score = scoreRelevance({ title, symbols: ["GOOGL"] }, symbol, companyName);
+      expect(score).toBe(0.4);
+    }
   });
 });
