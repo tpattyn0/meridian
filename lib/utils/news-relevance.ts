@@ -48,7 +48,15 @@ export function deriveMatchTokens(symbol: string, companyName?: string): string[
   if (companyName) {
     const core = companyName
       .replace(CORP_SUFFIX, '')
-      .replace(/[,\s]+$/, '')
+      // Strip trailing punctuation left behind by suffix removal (e.g.
+      // "Alphabet Inc." -> "Alphabet ." after CORP_SUFFIX strips "Inc",
+      // since the orphaned "." is neither a comma nor whitespace and
+      // survived the old /[,\s]+$/ trim) and collapse the internal
+      // whitespace the removal leaves (NSA-Q-derived fix, regression review
+      // 2026-07-24: deriveMatchTokens('GOOGL', 'Alphabet Inc.') previously
+      // returned the junk token "alphabet .").
+      .replace(/[,.\s]+$/, '')
+      .replace(/\s+/g, ' ')
       .trim()
       .toLowerCase();
     if (core.length >= 2) tokens.add(core);
@@ -126,10 +134,77 @@ export interface RelevanceInput {
 }
 
 /**
+ * Per-field score bands (regression fix, review 2026-07-24 manual-check
+ * finding). The original scorer added one of these amounts **per matching
+ * token**, so a title containing both the ticker token ("googl") and the
+ * company-core token ("alphabet") — a completely ordinary shape for
+ * ticker-stuffed boilerplate like a 13F filing notice — scored
+ * `0.5 + 0.5 = 1.0` before the symbols bonus was even added. Nearly every
+ * article converged on the 1.0 ceiling, which collapsed news.service.ts's
+ * relevance-then-recency sort (a >0.1 gap is required to prefer relevance)
+ * into pure recency — and a continuously-publishing boilerplate source
+ * (MarketBeat 13F notices) crowded out real reporting.
+ *
+ * Each field now contributes **at most its own band regardless of how many
+ * tokens hit** — multiple token matches in the same field no longer stack.
+ * This preserves the intended ordering (title > summary > content, symbols
+ * array match a solid bonus) while spreading scores across the range instead
+ * of piling at 1.00.
+ */
+const TITLE_MATCH_SCORE = 0.5;
+const SUMMARY_MATCH_SCORE = 0.2;
+const CONTENT_MATCH_SCORE = 0.1;
+const SYMBOLS_MATCH_SCORE = 0.3;
+
+/**
+ * Boilerplate-title demotion (plan regression fix, review 2026-07-24).
+ * Institutional-holdings / 13F filing-notice headlines ("Nwam LLC Buys
+ * 8,055 Shares of Alphabet Inc. $GOOGL", "Alphabet Inc. $GOOGL Shares Sold
+ * by Bryn Mawr Trust Advisors LLC", "Boosts Stock Position in...", "Grows
+ * Stake in...", "Has $1.2 Million Stake in...") are technically on-topic —
+ * they legitimately mention the company and ticker — but are near-worthless
+ * for sentiment: they report routine 13F portfolio rebalancing, not news,
+ * and a handful of publishers (MarketBeat chief among them) emit them
+ * continuously, so left unchecked they crowd out genuine reporting purely
+ * by publishing volume once the saturation fix above stops them tying at
+ * 1.0 with everything else.
+ *
+ * Matched narrowly on title *shape* (an institutional/fund-sounding actor
+ * name combined with a holdings verb and a share/stake noun), not on the
+ * mere presence of a share count or dollar figure — a headline like
+ * "Company raises 2025 guidance, adds 500 jobs" must not be caught by this.
+ */
+const BOILERPLATE_TITLE_PATTERNS: RegExp[] = [
+  // "X (LLC|Inc|Trust|Advisors|Group|Capital|Management|...) Buys/Sells/Acquires/Purchases
+  // N Shares of ..." — the share count can appear either before "Shares"
+  // ("Buys 8,055 Shares of") or after "Shares of" ("Acquires Shares of
+  // 4,494 Alphabet Inc.", the live MarketBeat variant that motivated
+  // widening this from a single fixed word order).
+  /\b(buys|sells|acquires|purchases)\s([\d,.]+\s(shares|stake)\s(of|in)|shares\sof\s[\d,.]+)\b/i,
+  // "... Shares Sold by X" / "... Shares Bought by X" / "... Shares Acquired by X"
+  /\bshares\s(sold|bought|acquired|purchased)\sby\b/i,
+  // "Boosts/Grows/Trims/Cuts/Reduces/Raises/Lowers Stock Position in/Stake in ..."
+  /\b(boosts|grows|trims|cuts|reduces|raises|lowers|increases|decreases)\s(its\s)?(stock\s)?(position|holdings|stake)\s(in|by)\b/i,
+  // "Has $N (Million|Billion) Stake in ..." / "Holds $N Million Position in ..."
+  /\bhas\s\$[\d,.]+\s(million|billion|thousand)\s(stake|position|holdings)\s(in|of)\b/i,
+];
+
+/** Multiplier applied to the whole score when the title matches a boilerplate 13F-style shape. */
+const BOILERPLATE_DEMOTION_FACTOR = 0.5;
+
+function isBoilerplateFilingTitle(title: string): boolean {
+  return BOILERPLATE_TITLE_PATTERNS.some((re) => re.test(title));
+}
+
+/**
  * Scores one article's relevance to `symbol`/`companyName` on a 0..1 scale,
  * token-based and word-boundary matched (not literal substring). Mirrors the
  * old weighting shape (title match to be worth more than summary, symbol
- * array match a solid bonus) but on tokens instead of raw search terms.
+ * array match a solid bonus) but on tokens instead of raw search terms, and
+ * caps each field's contribution so multiple token matches within one field
+ * cannot stack past that field's band (see the saturation-fix comment
+ * above). A 13F/institutional-holdings-filing-shaped title is demoted after
+ * the base score is computed — it is still relevant, just deprioritized.
  */
 export function scoreRelevance(
   article: RelevanceInput,
@@ -141,16 +216,21 @@ export function scoreRelevance(
   const summaryText = article.summary || '';
   const contentText = article.content || '';
 
-  let score = 0;
+  const titleMatches = tokens.some((token) => matchesWordBoundary(titleText, token));
+  const summaryMatches = tokens.some((token) => matchesWordBoundary(summaryText, token));
+  const contentMatches = tokens.some((token) => matchesWordBoundary(contentText, token));
 
-  for (const token of tokens) {
-    if (matchesWordBoundary(titleText, token)) score += 0.5;
-    if (matchesWordBoundary(summaryText, token)) score += 0.2;
-    if (matchesWordBoundary(contentText, token)) score += 0.1;
-  }
+  let score = 0;
+  if (titleMatches) score += TITLE_MATCH_SCORE;
+  if (summaryMatches) score += SUMMARY_MATCH_SCORE;
+  if (contentMatches) score += CONTENT_MATCH_SCORE;
 
   if (article.symbols?.some((s) => tickerCreditsSymbol(s, symbol))) {
-    score += 0.3;
+    score += SYMBOLS_MATCH_SCORE;
+  }
+
+  if (score > 0 && isBoilerplateFilingTitle(titleText)) {
+    score *= BOILERPLATE_DEMOTION_FACTOR;
   }
 
   return Math.max(0, Math.min(1, score));
