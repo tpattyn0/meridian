@@ -377,7 +377,6 @@ describe("scoreRelevance — 13F/institutional-holdings boilerplate demotion", (
       ["Alphabet Shares Sold by Insiders Ahead of Earnings", 0.8],
       ["Alphabet shares sold by CEO Sundar Pichai under 10b5-1 plan", 0.8],
       ["Alphabet insider sells 4,000 shares of stock", 0.8],
-      ["Berkshire Hathaway Buys 5,000,000 Shares of Alphabet", 0.8],
     ];
     for (const [title, expectedScore] of expected) {
       const score = scoreRelevance({ title, symbols: ["GOOGL"] }, symbol, companyName);
@@ -397,10 +396,90 @@ describe("scoreRelevance — 13F/institutional-holdings boilerplate demotion", (
       "Harbor Advisors Grows Stake in Alphabet Inc. $GOOGL",
       "Elm Street Wealth Has $1.2 Million Stake in Alphabet Inc. $GOOGL",
       "ABC Arbitrage SA Acquires Shares of 4,494 Alphabet Inc. $GOOGL",
+      // NSA4-I1: carries the "Inc." suffix a real filer's name actually has
+      // (the pre-fix version of this case, "Berkshire Hathaway Buys
+      // 5,000,000 Shares of Alphabet" with no suffix, passed the old
+      // "does not demote" test at 0.8 for the wrong reason — it never
+      // engaged the actor-anchor pattern at all, since bare "Berkshire
+      // Hathaway" carries no institutional suffix. This is the corrected
+      // shape: Berkshire Hathaway Inc. is a genuine third-party
+      // institutional filer, not the requested company (Alphabet), so it
+      // must still demote — proving the NSA4-I1 self-exclusion fix demotes
+      // a real 13F filer and only un-demotes the subject company's own
+      // corporate actions (see the dedicated describe block below).
+      "Berkshire Hathaway Inc. Buys 5,000,000 Shares of Alphabet",
     ];
     for (const title of true13FShapes) {
       const score = scoreRelevance({ title, symbols: ["GOOGL"] }, symbol, companyName);
       expect(score).toBe(0.4);
     }
+  });
+
+  it("demotes real filer-name shapes using the Corp/Lllp/Associates suffixes (NSA4-I1, live-measured filer shapes)", () => {
+    // Corp/Lllp/Associates were absent from INSTITUTIONAL_ACTOR_SUFFIX even
+    // though real MarketBeat-style filer names use them ("Corp" is also
+    // already present in the unrelated CORP_SUFFIX list used for company-name
+    // token derivation — the two lists serve different purposes and were not
+    // in sync).
+    const realFilerShapes = [
+      "Van ECK Associates Corp Sells 500 Shares of Alphabet Inc. $GOOGL",
+      "Jones Financial Companies Lllp Buys 1,000 Shares of Alphabet Inc. $GOOGL",
+    ];
+    for (const title of realFilerShapes) {
+      const score = scoreRelevance({ title, symbols: ["GOOGL"] }, symbol, companyName);
+      expect(score, title).toBe(0.4);
+    }
+  });
+});
+
+describe("scoreRelevance — boilerplate self-exclusion for the subject company's own corporate actions (NSA4-I1)", () => {
+  const symbol = "GOOGL";
+  const companyName = "Alphabet Inc.";
+
+  it("does not demote a genuine corporate-action headline where the subject company is the actor", () => {
+    // "Alphabet Inc." satisfies the institutional-actor suffix anchor
+    // (ends in "Inc."), so without the self-exclusion fix this matches
+    // pattern 1 (actor <suffix> buys/sells N shares of ...) and gets
+    // demoted to 0.40 — reintroducing the exact false-positive class
+    // NSA3-Q1 was raised to eliminate, through a different route. This is
+    // real news about the requested company, not a third-party 13F filer
+    // reporting a stake in it.
+    const score = scoreRelevance(
+      { title: "Alphabet Inc. Buys 100,000 Shares of Anthropic in AI push", symbols: ["GOOGL"] },
+      symbol,
+      companyName
+    );
+    expect(score).toBe(0.8);
+  });
+
+  it("still demotes a genuine third-party institutional filer's 13F notice about the subject company", () => {
+    // Sanity check the fix narrows correctly: a REAL third-party filer
+    // (Berkshire Hathaway, not Alphabet) reporting a stake in Alphabet must
+    // still be demoted — the self-exclusion must reject only a match whose
+    // actor segment IS the subject company, never a genuine other actor.
+    const score = scoreRelevance(
+      { title: "Berkshire Hathaway Inc. Buys 5,000,000 Shares of Alphabet", symbols: ["GOOGL"] },
+      symbol,
+      companyName
+    );
+    expect(score).toBe(0.4);
+  });
+
+  it("does not demote the subject company's own share-sale/reduction headline", () => {
+    const score = scoreRelevance(
+      { title: "Alphabet Inc. Sells 250,000 Shares of Anthropic to fund AI buildout", symbols: ["GOOGL"] },
+      symbol,
+      companyName
+    );
+    expect(score).toBe(0.8);
+  });
+
+  it("does not demote the subject company boosting a stake in another company", () => {
+    const score = scoreRelevance(
+      { title: "Alphabet Inc. Boosts Stock Position in Anthropic", symbols: ["GOOGL"] },
+      symbol,
+      companyName
+    );
+    expect(score).toBe(0.8);
   });
 });

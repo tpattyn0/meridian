@@ -30,6 +30,46 @@ export const CORP_SUFFIX =
 export const MIN_RELEVANCE = 0.4;
 
 /**
+ * Derives the company-name-derived subset of the match tokens: the
+ * corporate-suffix-stripped core phrase plus its individual words (>2
+ * chars). Deliberately excludes the ticker symbol — factored out of
+ * `deriveMatchTokens` so `isBoilerplateFilingTitle`'s self-exclusion check
+ * (NSA4-I1) can use company-name tokens only, without the raw ticker (a
+ * 2-4 letter symbol is too short to safely word-boundary-match against an
+ * arbitrary actor name).
+ */
+function deriveCompanyNameTokens(companyName?: string): string[] {
+  const tokens = new Set<string>();
+  if (!companyName) return [];
+
+  const core = companyName
+    .replace(CORP_SUFFIX, '')
+    // Strip trailing punctuation left behind by suffix removal (e.g.
+    // "Alphabet Inc." -> "Alphabet ." after CORP_SUFFIX strips "Inc",
+    // since the orphaned "." is neither a comma nor whitespace and
+    // survived the old /[,\s]+$/ trim) and collapse the internal
+    // whitespace the removal leaves (NSA-Q-derived fix, regression review
+    // 2026-07-24: deriveMatchTokens('GOOGL', 'Alphabet Inc.') previously
+    // returned the junk token "alphabet .").
+    .replace(/[,.\s]+$/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+  if (core.length >= 2) tokens.add(core);
+
+  // Also add the individual words of the core name (>2 chars each) so a
+  // multi-word company name ("Alphabet Inc.") still matches via its most
+  // distinctive single word ("alphabet") even if the exact-phrase core
+  // itself doesn't appear verbatim in a headline.
+  core
+    .split(/\s+/)
+    .filter((w) => w.length > 2)
+    .forEach((w) => tokens.add(w));
+
+  return Array.from(tokens);
+}
+
+/**
  * Derives the match tokens for a symbol + optional company name: the raw
  * symbol, the exchange-stripped symbol, and the company name reduced to its
  * distinctive core by stripping corporate suffixes. Tokens are lowercased
@@ -45,31 +85,7 @@ export function deriveMatchTokens(symbol: string, companyName?: string): string[
   const cleanSymbol = symbol.split('.')[0].trim().toLowerCase();
   if (cleanSymbol.length >= 2) tokens.add(cleanSymbol);
 
-  if (companyName) {
-    const core = companyName
-      .replace(CORP_SUFFIX, '')
-      // Strip trailing punctuation left behind by suffix removal (e.g.
-      // "Alphabet Inc." -> "Alphabet ." after CORP_SUFFIX strips "Inc",
-      // since the orphaned "." is neither a comma nor whitespace and
-      // survived the old /[,\s]+$/ trim) and collapse the internal
-      // whitespace the removal leaves (NSA-Q-derived fix, regression review
-      // 2026-07-24: deriveMatchTokens('GOOGL', 'Alphabet Inc.') previously
-      // returned the junk token "alphabet .").
-      .replace(/[,.\s]+$/, '')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .toLowerCase();
-    if (core.length >= 2) tokens.add(core);
-
-    // Also add the individual words of the core name (>2 chars each) so a
-    // multi-word company name ("Alphabet Inc.") still matches via its most
-    // distinctive single word ("alphabet") even if the exact-phrase core
-    // itself doesn't appear verbatim in a headline.
-    core
-      .split(/\s+/)
-      .filter((w) => w.length > 2)
-      .forEach((w) => tokens.add(w));
-  }
+  deriveCompanyNameTokens(companyName).forEach((t) => tokens.add(t));
 
   return Array.from(tokens);
 }
@@ -172,10 +188,19 @@ const SYMBOLS_MATCH_SCORE = 0.3;
  *
  * **Matching requires an institutional-actor anchor** — a preceding word
  * (the "actor") immediately followed by one of `INSTITUTIONAL_ACTOR_SUFFIX`
- * (LLC, LP, Inc., Trust, Advisors, Management, Capital, Partners, Group,
- * Wealth, Asset (Management), Retirement System, Bank, Bancorp, Financial,
- * Investments, Holdings, Fund, Co., S.A.) — combined with the holdings verb
- * and share/stake noun. The original version of this pattern set matched on
+ * (LLC, LP, Lllp, Inc., Corp., Trust, Advisors, Associates, Management,
+ * Capital, Partners, Group, Wealth, Asset (Management), Retirement System,
+ * Bank, Bancorp, Financial, Investments, Holdings, Fund, Co., S.A. — `Lllp`,
+ * `Corp`, and `Associates` added review iteration 4, NSA4-I1, for real
+ * live-measured MarketBeat-style filer-name shapes the original list
+ * missed) — combined with the holdings verb and share/stake noun, **and the
+ * matched actor must not be the requested company itself** (`ACTOR_NAME`'s
+ * capture group is checked against `deriveCompanyNameTokens` in
+ * `isBoilerplateFilingTitle` — NSA4-I1's other half: without this check,
+ * "Alphabet Inc." satisfies the anchor for a genuine Alphabet corporate
+ * action, e.g. "Alphabet Inc. Buys 100,000 Shares of Anthropic", and that
+ * real-news headline was being wrongly demoted). The original version of
+ * this pattern set matched on
  * the verb+noun phrasing alone with no actor anchor at all, despite this
  * comment already claiming the narrower match: it silently demoted genuine
  * corporate-action, insider-transaction, and index-rebalance headlines with
@@ -189,9 +214,14 @@ const SYMBOLS_MATCH_SCORE = 0.3;
  * "Company raises 2025 guidance, adds 500 jobs" must not be caught by this.
  */
 const INSTITUTIONAL_ACTOR_SUFFIX =
-  "(?:LLC|LP|L\\.P\\.|Inc\\.?|Trust|Advisors|Advisers|Management|Capital|Partners|Group|Wealth|Asset(?:\\sManagement)?|Retirement\\sSystem|Bank|Bancorp|Financial|Investments?|Holdings?|Fund|Co\\.?|S\\.?A\\.?)";
-/** Up to 5 words of actor name preceding the institutional-actor suffix. */
-const ACTOR_NAME = "\\w+(?:\\s\\w+){0,4}\\s" + INSTITUTIONAL_ACTOR_SUFFIX;
+  "(?:LLC|LP|L\\.P\\.|Lllp|Inc\\.?|Corp\\.?|Trust|Advisors|Advisers|Associates|Management|Capital|Partners|Group|Wealth|Asset(?:\\sManagement)?|Retirement\\sSystem|Bank|Bancorp|Financial|Investments?|Holdings?|Fund|Co\\.?|S\\.?A\\.?)";
+/**
+ * Up to 5 words of actor name preceding the institutional-actor suffix,
+ * captured (group 1) so the matched actor segment can be checked against
+ * the requested company's own name (NSA4-I1) — see
+ * `actorSegmentIsSubjectCompany` below.
+ */
+const ACTOR_NAME = "(\\w+(?:\\s\\w+){0,4}\\s" + INSTITUTIONAL_ACTOR_SUFFIX + ")";
 
 const BOILERPLATE_TITLE_PATTERNS: RegExp[] = [
   // "<Actor> <SUFFIX> Buys/Sells/Acquires/Purchases N Shares of ..." — the
@@ -242,8 +272,40 @@ const BOILERPLATE_TITLE_PATTERNS: RegExp[] = [
  */
 const BOILERPLATE_DEMOTION_FACTOR = 0.5;
 
-function isBoilerplateFilingTitle(title: string): boolean {
-  return BOILERPLATE_TITLE_PATTERNS.some((re) => re.test(title));
+/**
+ * True if the matched actor segment (e.g. "Alphabet Inc." out of "Alphabet
+ * Inc. Buys 100,000 Shares of Anthropic") IS the requested company itself,
+ * rather than a third-party institutional filer reporting a stake in it
+ * (NSA4-I1). `companyTokens` is the company-name-derived subset of
+ * `deriveMatchTokens`'s output (never the bare ticker — a 2-4 letter symbol
+ * is too short to safely word-boundary-match against an arbitrary actor
+ * name and isn't how a filer byline would reference the subject anyway).
+ * Word-boundary matched, same as the rest of this file, so "Alphabet" in
+ * the actor segment doesn't accidentally match an unrelated longer word.
+ */
+function actorSegmentIsSubjectCompany(actorSegment: string, companyTokens: string[]): boolean {
+  return companyTokens.some((token) => matchesWordBoundary(actorSegment, token));
+}
+
+/**
+ * True if `title` matches a 13F/institutional-holdings filing-notice shape
+ * AND the matched actor is not the requested company itself (NSA4-I1) — a
+ * headline where the *subject* company is the one buying/selling (a real
+ * corporate action, e.g. "Alphabet Inc. Buys 100,000 Shares of Anthropic")
+ * must never be demoted as boilerplate just because its own corporate
+ * suffix ("Inc.") satisfies the institutional-actor anchor. `companyTokens`
+ * is the same company-name-derived token subset `actorSegmentIsSubjectCompany`
+ * checks against — this exclusion can only ever *un*-demote a title (it
+ * narrows an existing match), so it cannot reintroduce a false negative.
+ */
+function isBoilerplateFilingTitle(title: string, companyTokens: string[]): boolean {
+  return BOILERPLATE_TITLE_PATTERNS.some((re) => {
+    const match = re.exec(title);
+    if (!match) return false;
+    const actorSegment = match[1] ?? "";
+    if (actorSegmentIsSubjectCompany(actorSegment, companyTokens)) return false;
+    return true;
+  });
 }
 
 /**
@@ -279,7 +341,7 @@ export function scoreRelevance(
     score += SYMBOLS_MATCH_SCORE;
   }
 
-  if (score > 0 && isBoilerplateFilingTitle(titleText)) {
+  if (score > 0 && isBoilerplateFilingTitle(titleText, deriveCompanyNameTokens(companyName))) {
     score *= BOILERPLATE_DEMOTION_FACTOR;
   }
 
