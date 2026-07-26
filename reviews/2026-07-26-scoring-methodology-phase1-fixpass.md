@@ -1,6 +1,6 @@
 # Review: scoring-methodology Phase 1 — fix-pass verification (SCM-P1-I1/S1/S2)
 Date: 2026-07-26
-Status:
+Status: IMPLEMENTED — 2026-07-26
 
 ## Summary
 Findings: 0 BLOCKERs, 0 ISSUEs, 0 SUGGESTIONs, 0 QUESTIONs

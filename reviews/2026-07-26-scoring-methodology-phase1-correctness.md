@@ -1,6 +1,6 @@
 # Review: scoring-methodology Phase 1 correctness fixes (SCM-01…13 + SCM-06)
 Date: 2026-07-26
-Status:
+Status: IMPLEMENTED — 2026-07-26
 
 ## Summary
 Findings: 0 BLOCKERs, 1 ISSUE, 2 SUGGESTIONs, 0 QUESTIONs
