@@ -101,7 +101,10 @@ export interface FundamentalMetricsResponse {
   dividend: {
     yield: number | null;
     payoutRatio: number | null;
-    growthRate: number | null;
+    // SCM-09: renamed from growthRate — this field is populated from
+    // summaryDetail.fiveYearAvgDividendYield (a yield), not a computed
+    // growth rate. See lib/services/fundamental-analysis.service.ts.
+    fiveYearAvgYield: number | null;
   };
   score: {
     total: number;

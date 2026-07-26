@@ -46,7 +46,10 @@ interface TechnicalIndicators {
 
   // v2.0 Enhanced outputs
   signal: 'STRONG_BUY' | 'BUY' | 'WEAK_BUY' | 'HOLD' | 'WEAK_SELL' | 'SELL' | 'STRONG_SELL' | 'INSUFFICIENT_DATA';
-  score: number;
+  // SCM-03: `null` for the INSUFFICIENT_DATA case (getInsufficientDataResponse)
+  // so no consumer can read it as a real bearish 0. Every other signal keeps
+  // a real number. Consumers gate on `typeof score === 'number'` already.
+  score: number | null;
   baseScore: number;
   confidence: 'HIGH' | 'MEDIUM' | 'LOW';
   confidenceStars: number;
@@ -547,7 +550,13 @@ export class TechnicalAnalysisService {
 
     // === VOLATILITY INDICATORS ===
 
-    // Bollinger Bands (weight: 3) - v2.0: now scored
+    // Bollinger Bands (weight: 3)
+    // SCM-04: the Bollinger middle band IS the 20-day SMA, so the previous
+    // "Upper Half"/"Lower Half" branches re-scored the exact same
+    // price-vs-SMA20 comparison already scored under trend (weight 3) —
+    // the same signal counted twice under two names. Now: score only at
+    // band extremes (above upper / below lower); the mid-band case is
+    // neutral (0 points), not a duplicate trend vote.
     if (indicators.bollingerBands) {
       const weight = 3;
       totalWeight += weight;
@@ -571,18 +580,12 @@ export class TechnicalAnalysisService {
         bbSignal = 'bullish';
         position = 'Below Lower Band';
         warnings.push('Price below Bollinger lower band - potentially oversold');
-      } else if (currentPrice > bb.middle) {
-        // Between middle and upper - bullish zone
-        bbPoints = 1.5;
-        bullishPoints += bbPoints;
-        bbSignal = 'bullish';
-        position = 'Upper Half';
       } else {
-        // Between lower and middle - bearish zone
-        bbPoints = 1.5;
-        bearishPoints += bbPoints;
-        bbSignal = 'bearish';
-        position = 'Lower Half';
+        // Between the bands — neutral. Do not re-score price-vs-SMA20; that
+        // signal is already counted under trend.
+        bbPoints = 0;
+        bbSignal = 'neutral';
+        position = currentPrice > bb.middle ? 'Upper Half' : 'Lower Half';
       }
 
       breakdown.volatility.bollinger = {
@@ -649,7 +652,9 @@ export class TechnicalAnalysisService {
     if (totalWeight === 0 || indicatorsUsed < 2) {
       return {
         signal: 'INSUFFICIENT_DATA',
-        score: 0,
+        // SCM-03: null, not 0 — 0 is maximally bearish on the 0-10 scale and
+        // was previously consumed by wishlist.service.ts as a real score.
+        score: null,
         baseScore: 0,
         confidence: 'LOW',
         confidenceStars: 1,
@@ -738,7 +743,10 @@ export class TechnicalAnalysisService {
       rsi14: null,
       macd: { value: null, signal: null, histogram: null },
       signal: 'HOLD',
-      score: 0,
+      // SCM-03: only ever consumed via getInsufficientDataResponse (below),
+      // which overrides `signal` to INSUFFICIENT_DATA — null here keeps this
+      // base object honest that no real score was computed.
+      score: null,
       baseScore: 0,
       confidence: 'LOW',
       confidenceStars: 1,

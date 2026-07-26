@@ -111,23 +111,37 @@ export class IntrinsicValueService {
    */
   private static calculateDCFLite(data: FundamentalData): ValuationMethod {
     const eps = data.eps;
-    const earningsGrowth = data.earningsGrowth || 0;
-    
+
+    // SCM-13: distinguish MISSING growth (no data — should not enter the
+    // ensemble at all) from a REPORTED 0% growth (a legitimate, if bearish,
+    // input). `earningsGrowth || 0` previously collapsed both cases to 0%,
+    // producing a strong "overvalued" vote purely from a data gap. A missing
+    // value returns value: null below so this method is excluded from the
+    // weighted average, exactly like every other method's "insufficient
+    // inputs" case.
+    const earningsGrowthMissing = data.earningsGrowth === null || data.earningsGrowth === undefined;
+    const earningsGrowth = data.earningsGrowth ?? 0;
+
     // Cap growth at 15% for conservative estimate
     const g = Math.min(earningsGrowth, 0.15);
-    
-    // Use industry average P/E or default to 15
-    const terminalPE = data.peRatio && data.peRatio > 0 && data.peRatio < 50 
-      ? data.peRatio 
+
+    // SCM-05: the terminal multiple previously used the stock's OWN trailing
+    // P/E uncapped (up to <50), which is circular — an expensive stock is
+    // granted an expensive exit multiple, validating its own price. Capped
+    // at a documented ceiling of 18 (never the stock's own uncapped current
+    // multiple) until sector-median terminal multiples land (SCM-14).
+    const TERMINAL_PE_CAP = 18;
+    const terminalPE = data.peRatio && data.peRatio > 0
+      ? Math.min(data.peRatio, TERMINAL_PE_CAP)
       : 15;
 
     let value = null;
-    if (eps && eps > 0) {
+    if (!earningsGrowthMissing && eps && eps > 0) {
       // Project earnings 5 years out
       const futureEPS = eps * Math.pow(1 + g, 5);
       // Apply terminal multiple
       value = futureEPS * terminalPE;
-      
+
       // Discount back to present value (using 10% discount rate)
       const discountRate = 0.10;
       value = value / Math.pow(1 + discountRate, 5);

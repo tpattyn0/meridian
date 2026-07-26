@@ -192,25 +192,41 @@ export class AnalystRatingsService {
 
   private calculateScore(ratings: Omit<AnalystRatings, 'score' | 'scoreInterpretation'>): number {
     if (ratings.totalAnalysts === 0) return 5; // Neutral score if no ratings
-    
-    // Weighted score where Strong Buy = 10, Buy = 8, Hold = 5, Sell = 2, Strong Sell = 0
+
+    // SCM-11: sell-side analysts almost never publish Sell ratings (they
+    // need management access; their banks may want the company's
+    // business), so the real-world distribution across large-cap coverage
+    // is roughly 55-60% Buy / 35-40% Hold / ~5% Sell. The old mapping
+    // (SB=10, B=8, H=5, S=2, SS=0) landed nearly every liquid stock at
+    // 6.5-8.5 — a near-constant bullish offset occupying 15% of the
+    // composite with almost no cross-stock discrimination. Recentered
+    // (review's option 3, lowest-effort / no new data dependency) so a
+    // typical buy-skewed consensus (~55% Buy / 40% Hold / 5% Sell) lands
+    // approximately 5-6 instead.
     const weightedScore = (
-      (ratings.strongBuy * 10) +
-      (ratings.buy * 8) +
-      (ratings.hold * 5) +
-      (ratings.sell * 2) +
+      (ratings.strongBuy * 9) +
+      (ratings.buy * 7) +
+      (ratings.hold * 4) +
+      (ratings.sell * 1.5) +
       (ratings.strongSell * 0)
     ) / ratings.totalAnalysts;
-    
-    // Normalize to 1-10 scale
-    return Math.min(10, Math.max(1, weightedScore));
+
+    // Normalize to 0-10 scale (was 1-10 — the old floor of 1 no longer
+    // makes sense against a Strong Sell weight of 0; the min/max clamp is
+    // defensive only, since the weighted average of 0-9 inputs never
+    // exceeds that range).
+    return Math.min(10, Math.max(0, weightedScore));
   }
 
   private getScoreInterpretation(score: number): string {
-    if (score >= 7) return 'Strong Buy - Analysts are very bullish on this stock';
-    if (score >= 5.5) return 'Buy - Analysts are generally positive about this stock';
-    if (score >= 4.5) return 'Hold - Analysts are neutral on this stock';
-    if (score >= 3) return 'Sell - Analysts are generally negative about this stock';
+    // SCM-11: thresholds shifted down to track the recentered calculateScore
+    // mapping above (SB=9/B=7/H=4/S=1.5/SS=0) so the interpretation labels
+    // stay sensible at the new boundaries rather than everything reading
+    // "Buy"/"Strong Buy" under the old 1-10-scale thresholds.
+    if (score >= 6) return 'Strong Buy - Analysts are very bullish on this stock';
+    if (score >= 4.5) return 'Buy - Analysts are generally positive about this stock';
+    if (score >= 3) return 'Hold - Analysts are neutral on this stock';
+    if (score >= 1.5) return 'Sell - Analysts are generally negative about this stock';
     return 'Strong Sell - Analysts are very bearish on this stock';
   }
 

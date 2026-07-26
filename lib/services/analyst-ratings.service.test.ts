@@ -290,3 +290,75 @@ describe("AnalystRatingsService — targetLow/High and revisions mapping", () =>
     expect(safeQuoteSummaryMock).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * SCM-11 (reviews/2026-07-17-scoring-methodology.md,
+ * plans/2026-07-26-scoring-methodology-phase1-correctness.md): the old
+ * mapping (SB=10, B=8, H=5, S=2, SS=0) landed nearly every buy-skewed
+ * consensus at 6.5-8.5, injecting a near-constant bullish offset into 15% of
+ * the composite. Recentered to SB=9/B=7/H=4/S=1.5/SS=0 (review's option 3)
+ * so a typical buy-skewed distribution lands approximately 5-6.
+ */
+describe("AnalystRatingsService.calculateScore — SCM-11 recentered rating mapping", () => {
+  let service: AnalystRatingsService;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    findUniqueMock.mockResolvedValue(null);
+    upsertMock.mockResolvedValue({});
+    service = new AnalystRatingsService();
+  });
+
+  it("scores a realistic buy-skewed consensus (~55% buy / 40% hold / 5% sell) around 5-6, not 6.5-8.5", async () => {
+    safeQuoteSummaryMock.mockResolvedValueOnce({
+      financialData: { targetMeanPrice: 175 },
+      recommendationTrend: {
+        trend: [{ strongBuy: 0, buy: 55, hold: 40, sell: 5, strongSell: 0 }],
+      },
+    });
+
+    const result = await service.fetchAnalystRatings("TYPICAL");
+
+    expect(result.score).toBeGreaterThanOrEqual(5);
+    expect(result.score).toBeLessThanOrEqual(6);
+  });
+
+  it("still scores a genuine strong-buy consensus high", async () => {
+    safeQuoteSummaryMock.mockResolvedValueOnce({
+      financialData: { targetMeanPrice: 175 },
+      recommendationTrend: {
+        trend: [{ strongBuy: 18, buy: 2, hold: 0, sell: 0, strongSell: 0 }],
+      },
+    });
+
+    const result = await service.fetchAnalystRatings("STRONGBUY");
+
+    expect(result.score).toBeGreaterThanOrEqual(8);
+  });
+
+  it("scores a sell-heavy consensus low", async () => {
+    safeQuoteSummaryMock.mockResolvedValueOnce({
+      financialData: { targetMeanPrice: 50 },
+      recommendationTrend: {
+        trend: [{ strongBuy: 0, buy: 0, hold: 2, sell: 8, strongSell: 10 }],
+      },
+    });
+
+    const result = await service.fetchAnalystRatings("SELLHEAVY");
+
+    expect(result.score).toBeLessThanOrEqual(2);
+  });
+
+  it("keeps interpretation labels sensible at the recentered boundaries", async () => {
+    safeQuoteSummaryMock.mockResolvedValueOnce({
+      financialData: { targetMeanPrice: 175 },
+      recommendationTrend: {
+        trend: [{ strongBuy: 0, buy: 55, hold: 40, sell: 5, strongSell: 0 }],
+      },
+    });
+
+    const result = await service.fetchAnalystRatings("LABELCHECK");
+
+    expect(result.scoreInterpretation).toMatch(/Buy|Hold/);
+  });
+});

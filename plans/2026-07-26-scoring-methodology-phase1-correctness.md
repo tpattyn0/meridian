@@ -112,7 +112,7 @@ Ordered by file. `[ ]` todo · `[~]` in progress · `[x]` done (acceptance passe
 
 ### `lib/services/fundamental-analysis.service.ts`
 
-1. [ ] **SCM-01** — In `extractMetrics`, replace `|| null` with `?? null` (or `typeof`
+1. [x] **SCM-01** — In `extractMetrics`, replace `|| null` with `?? null` (or `typeof`
    guards) on all numeric fields, and fix the `debtToEquity` truthy ternary to a nullish
    guard so `0` survives. Keep the downstream `> 0` scoring gates unchanged.
    — Acceptance: new unit tests assert that `revenueGrowth: 0`, `earningsGrowth: 0`,
@@ -120,27 +120,27 @@ Ordered by file. `[ ]` todo · `[~]` in progress · `[x]` done (acceptance passe
    `debtToEquity === 0` reaches `scoreDebtToEquity` and `growth === 0` reaches `scoreGrowth`
    (→ 3, per the `> 0` brackets) rather than being excluded. `npm run verify` green.
 
-2. [ ] **SCM-02** — Guard `ratio < 0` in `scoreDebtToEquity` (or at its call site) so
+2. [x] **SCM-02** — Guard `ratio < 0` in `scoreDebtToEquity` (or at its call site) so
    negative D/E is excluded from `financialScores` with a warning, not scored 9.
    — Acceptance: unit test asserts a negative `debtToEquity` is not added to the financial
    sub-score set (and, if all other financial metrics are absent, `breakdown.financial`
    falls to the neutral default rather than 9). Positive D/E behavior unchanged (regression
    test on an existing bracket value).
 
-3. [ ] **SCM-07** — Compute FCF = `operatingCashflow − capex` from the cash-flow module when
+3. [x] **SCM-07** — Compute FCF = `operatingCashflow − capex` from the cash-flow module when
    `freeCashflow` is absent; return `null` for `pfcfRatio` if true FCF cannot be computed,
    instead of silently substituting operating cash flow.
    — Acceptance: unit test — given `freeCashflow` absent but `operatingCashflow` and `capex`
    present, `pfcfRatio` uses `opCF − capex`; given no capex available, `pfcfRatio` is `null`
    (not opCF-based). `npm run verify` green.
 
-4. [ ] **SCM-08** — In `scoreEVToEbitda`, disambiguate negative ratios by the sign of EBITDA
+4. [x] **SCM-08** — In `scoreEVToEbitda`, disambiguate negative ratios by the sign of EBITDA
    (or EV): negative-EBITDA ⇒ 3 (unchanged); negative-EV / positive-EBITDA ⇒ high score with
    a warning.
    — Acceptance: unit tests for both negative branches — negative-EBITDA still scores 3;
    negative-EV/positive-EBITDA scores high (≥7). Positive-ratio brackets unchanged.
 
-5. [ ] **SCM-09** — Rename `dividend.growthRate` to `dividend.fiveYearAvgYield` throughout
+5. [x] **SCM-09** — Rename `dividend.growthRate` to `dividend.fiveYearAvgYield` throughout
    the metrics type, extraction, and DB persistence (the `dividendGrowth` column write is
    mislabeled — relabel the mapping, no schema migration; confirm the persisted column semantics
    in the acceptance check). Stop calling a yield a growth rate.
@@ -148,7 +148,7 @@ Ordered by file. `[ ]` todo · `[~]` in progress · `[x]` done (acceptance passe
    `summaryDetail.fiveYearAvgDividendYield` and no code path treats it as a growth rate.
    `npm run verify` green.
 
-6. [ ] **SCM-10** — (a) For non-payers (`dividend.yield` null/0), drop the dividend pillar and
+6. [x] **SCM-10** — (a) For non-payers (`dividend.yield` null/0), drop the dividend pillar and
    renormalize the remaining fundamental sub-pillar weights (do not score dividend `0` at
    fixed weight). (b) Score yield jointly with payout ratio so high-yield + high-payout is not
    rewarded monotonically.
@@ -158,7 +158,7 @@ Ordered by file. `[ ]` todo · `[~]` in progress · `[x]` done (acceptance passe
    with a low payout. `DEFAULT_SCORING_WEIGHTS` and the scale-invariance test in
    `scoring-weights.test.ts` stay green.
 
-7. [ ] **SCM-12** — Use the forward growth estimate from `earningsTrend` for the PEG-fallback
+7. [x] **SCM-12** — Use the forward growth estimate from `earningsTrend` for the PEG-fallback
    denominator; fall back to 3-year EPS CAGR if available; only then single-year YoY, flagged
    low-confidence.
    — Acceptance: unit test — given an `earningsTrend` forward-growth value, the computed PEG
@@ -167,7 +167,7 @@ Ordered by file. `[ ]` todo · `[~]` in progress · `[x]` done (acceptance passe
 
 ### `lib/services/technical-analysis.service.ts`
 
-8. [ ] **SCM-04** — In the Bollinger block, score only at band extremes (above upper / below
+8. [x] **SCM-04** — In the Bollinger block, score only at band extremes (above upper / below
    lower); return neutral 0 points between the bands, removing the "Upper Half"/"Lower Half"
    branches that duplicate the price-vs-SMA20 trend signal.
    — Acceptance: unit test — price between `bb.lower` and `bb.upper` yields `bbPoints === 0`
@@ -175,7 +175,7 @@ Ordered by file. `[ ]` todo · `[~]` in progress · `[x]` done (acceptance passe
    the correct direction. `bearishPoints`/`bullishPoints` totals for a mid-band case drop by
    the removed 1.5.
 
-9. [ ] **SCM-03 (source half)** — Make `getInsufficientDataResponse` carry a non-bearish
+9. [x] **SCM-03 (source half)** — Make `getInsufficientDataResponse` carry a non-bearish
    score so no consumer can read it as a real number (review recommends `score: null`); keep
    `signal: 'INSUFFICIENT_DATA'`. Ensure existing consumers that read `.score` still behave
    (the research-detail technical tab and the chart route).
@@ -185,7 +185,7 @@ Ordered by file. `[ ]` todo · `[~]` in progress · `[x]` done (acceptance passe
 
 ### `lib/services/wishlist.service.ts`
 
-10. [ ] **SCM-03 (consumer half)** — When the technical result's `signal === 'INSUFFICIENT_DATA'`
+10. [x] **SCM-03 (consumer half)** — When the technical result's `signal === 'INSUFFICIENT_DATA'`
     (or `.score` is null per Task 9), set `technicalScore = null` so the composite substitutes
     neutral 5, not a bearish 0.
     — Acceptance: unit test in `wishlist.service.test.ts` — an insufficient-data technical
@@ -194,13 +194,13 @@ Ordered by file. `[ ]` todo · `[~]` in progress · `[x]` done (acceptance passe
 
 ### `lib/services/intrinsic-value.service.ts`
 
-11. [ ] **SCM-05** — In `calculateDCFLite`, replace the terminal multiple with
+11. [x] **SCM-05** — In `calculateDCFLite`, replace the terminal multiple with
     `min(trailingPE, 18)` (documented cap), never the stock's own uncapped current multiple.
     — Acceptance: unit test — a high-P/E stock (e.g. trailingPE 40) uses terminal 18, not 40;
     a low-P/E stock (e.g. 12) uses 12. Fair value for the high-P/E case is materially lower
     than the pre-fix circular value.
 
-12. [ ] **SCM-13** — In `calculateDCFLite`, distinguish missing from reported-zero growth:
+12. [x] **SCM-13** — In `calculateDCFLite`, distinguish missing from reported-zero growth:
     when `earningsGrowth == null`, return `value: null` (excluded from the ensemble); a
     reported `0` stays a legitimate 0%-growth valuation.
     — Acceptance: unit tests — `earningsGrowth: null` ⇒ `value === null` and the method is
@@ -210,7 +210,7 @@ Ordered by file. `[ ]` todo · `[~]` in progress · `[x]` done (acceptance passe
 
 ### `lib/services/analyst-ratings.service.ts`
 
-13. [ ] **SCM-11** — Recenter the rating mapping in `calculateScore` to SB=9, B=7, H=4,
+13. [x] **SCM-11** — Recenter the rating mapping in `calculateScore` to SB=9, B=7, H=4,
     S=1.5, SS=0 so a typical buy-skewed consensus lands ≈ 5–6 (option 3). Update
     `getScoreInterpretation` thresholds if the recentering shifts the label boundaries.
     — Acceptance: unit tests — a realistic buy-skewed distribution (≈55% buy / 40% hold /
