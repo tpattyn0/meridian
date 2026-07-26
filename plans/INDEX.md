@@ -2,7 +2,7 @@
 
 | Plan | Date | Status | Review |
 |------|------|--------|--------|
-| plans/2026-07-26-scoring-methodology-phase1-correctness.md | 2026-07-26 | implementing | — |
+| plans/2026-07-26-scoring-methodology-phase1-correctness.md | 2026-07-26 | in review | — |
 | plans/2026-07-23-td33-hover-marker-padded-domain.md | 2026-07-23 | implemented | reviews/2026-07-23-td33-hover-marker.md |
 | plans/2026-07-23-td08-td15-cleanup.md | 2026-07-23 | implemented | reviews/2026-07-23-td08-td15-cleanup.md |
 | plans/2026-07-23-lib-cleanup-batch.md | 2026-07-23 | implemented | reviews/2026-07-23-lib-cleanup-batch.md |
