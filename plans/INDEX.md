@@ -29,3 +29,4 @@
 | plans/2026-07-21-scoring-weights-direct-percent.md | 2026-07-21 | implemented (migration applied 2026-07-21; supersedes OD-4 auto-normalize) | reviews/2026-07-21-scoring-weights-direct-percent.md |
 | plans/2026-07-21-scoring-style-presets.md | 2026-07-21 | implemented | reviews/2026-07-21-scoring-style-presets.md |
 | plans/2026-07-22-morning-note-active-positions-only.md | 2026-07-22 | implemented | reviews/2026-07-22-morning-note-active-positions-only.md |
+| plans/2026-07-24-news-sentiment-accuracy.md | 2026-07-24 | implemented | reviews/2026-07-24-news-sentiment-accuracy.md |

@@ -40,4 +40,8 @@ Captured 2026-07-18 from a feature-brainstorm session. Ordering within each sect
 
 - Product analytics instrumentation (signup / first-position / first-analysis events) — GTM.md launch KPIs are unmeasurable without it.
 - Quota / billing / entitlements — the free-tier research quota in GTM.md is strategy-only today.
-- TD-01 (live NewsAPI key in git history) and TD-02 (shared dev/prod database) explicitly block a production deploy.
+- TD-02 (shared dev/prod database) explicitly blocks a production deploy. TD-01 (live NewsAPI key in git history) no longer blocks a deploy as of 2026-07-24 (ADR-33, `plans/2026-07-24-news-sentiment-accuracy.md`) — NewsAPI was removed entirely, so nothing in the app can spend the exposed quota; the key remains live and public in history regardless.
+
+## News & sentiment
+
+- **Native per-article sentiment via a paid provider (e.g. EODHD).** Considered and explicitly rejected by the owner during `plans/2026-07-24-news-sentiment-accuracy.md` — the current pass replaces NewsAPI with keyless Google News RSS + Gemini-based sentiment scoring, no paid sources. A provider with built-in per-article sentiment (polarity/neg/neu/pos scores, as Compass's `RawArticle.sentiment` shape anticipates) could reduce reliance on LLM-based scoring and its associated latency/cost/model-availability risk, but is out of scope until the owner revisits it.

@@ -49,7 +49,7 @@
 - **Tradeoffs:** Anyone reading the public repo can spend this repo's NewsAPI quota, and the key cannot be revoked, so the exposure runs until a fresh key replaces it. Accepted because the blast radius is confined to a free-tier news quota: the key grants no access to our data, our users, or any account of value. This is explicitly *not* the reasoning that applied to `NEXTAUTH_SECRET`, which could forge sessions for any user and was rotated on that basis.
 - **Condition (this is what makes the decision valid):** the app is not deployed. Going to production changes the calculus — a live app makes quota exhaustion a user-visible outage rather than a private annoyance. TD-01 therefore carries a blocking precondition: obtain a fresh NewsAPI key before any production deploy.
 - **Supersedes:** the 2026-07-16 acceptance of ONB-01, which was made on the incorrect belief that the repo was a local-only clone. This one is made with the public exposure confirmed.
-- **Status:** accepted-but-flagged
+- **Status:** superseded by ADR-33
 - **Confidence:** High (on the reasoning; the condition is the thing to watch — a decision conditional on "we won't deploy" silently expires the moment someone deploys)
 
 ## ADR-8 — Meridian tokens replace the shadcn HSL-triple values in place; drop the `hsl()` wrapper
@@ -220,3 +220,155 @@
 - **Tradeoffs:** adds a fifth export to `chart-path.ts` and one more indirection inside `gridlineYs` (which previously inlined the formula), in exchange for making marker/gridline/reference-line drift impossible by construction rather than by matching comments. **Scope correction (TD33-S2, owner-accepted 2026-07-23):** this claim covers the marker, reference line, and gridlines — it does **not** yet cover `buildPath`, which still inlines its own copy of the same formula at `chart-path.ts:110`. `buildPath` needs a pixel `y` per point and uses a different zero-range guard (`|| 1`, which floors a flat series to the plot bottom) than `plotYFraction`'s explicit `range === 0` midpoint branch, so substituting it is a real refactor with a behavior decision attached, not a mechanical swap. The two copies agree numerically for every non-degenerate series (verified across 8,000 randomized cases over four `(height, padding)` geometries, max delta 2.84e-14); the residual is structural, not behavioral, and is tracked as **TD-40**. Rejected alternative: calling `gridlineYs(min, max, h, p, [v])[0]` at each site — no new export, but allocates an array per hover/RAF frame on the app's hottest render path and reads as a misuse of a tick-positioning helper. Also rejected: returning SVG pixels and dividing by height at the CSS call sites (the pattern the existing gridline *labels* use) — a round-trip through pixels for a value never needed in pixels. The reference-line fix (no live caller today — TD-DTL-SR, no support/resistance levels computed) is included anyway because it was a second copy of the same wrong formula in the same file, named explicitly in scope by the prior AGENT.md TD-33 entry.
 - **Status:** accepted
 - **Confidence:** High — the mapping is unit-tested against `buildPath`'s own vertex pixels and cross-checked against `gridlineYs`, including a deliberate revert-and-confirm-failure check during implementation (reverting the helper body to the un-padded formula makes 6 of the new tests fail, confirming they are not midpoint-only coverage); the pixel-level visual result is confirmable only by eye (TD-38: no component-render test seam) and is left to the owner's manual check per the PR body.
+
+## ADR-30 — Relevance scoring is token-based with word-boundary matching, on one shared threshold
+- **Decision:** Replace `news.service.ts`'s literal-substring relevance scoring with a
+  pure, exported helper (`lib/utils/news-relevance.ts`) that derives match tokens by
+  stripping corporate suffixes from the company name, matches on word boundaries, and
+  normalizes share-class ticker variants (GOOG↔GOOGL). A single exported `MIN_RELEVANCE`,
+  compared with `>=`, governs both the ingest filter and every DB read.
+- **Evidence:** `lib/utils/news-relevance.ts`; `lib/services/news.service.ts` ingest
+  filter and all three `findMany` relevance filters.
+- **Tradeoffs:** Token matching is more permissive than substring matching and will admit
+  some market-context articles that only mention the company in passing; accepted, because
+  the measured alternative discards the articles that explain a -7% day. The dead uppercase
+  penalty is removed rather than repaired, so no compensating precision mechanism remains —
+  precision now rests entirely on the token/threshold pair. That bet is larger under ADR-34's
+  RSS source, which measured 4 off-topic items per 100, than it was under the prior source
+  set; this filter is now the only guard against scoring another company's news.
+- **Status:** accepted
+- **Confidence:** High
+
+## ADR-31 — Sentiment analysis is one batched Gemini call constrained by responseSchema; failures persist as null, never neutral
+- **Decision:** Replace the per-article Gemini fan-out (capped at 3) with a single
+  `analyzeSentimentBatch` request whose `generationConfig` sets
+  `responseMimeType: 'application/json'`, `temperature: 0.1`, and an explicit
+  `responseSchema` (built with the SDK's `SchemaType` enum). Articles are tagged with string
+  ids (`art_0`, …) and results matched back by id, not array position. An article absent
+  from the response, or any parse/request failure, leaves `sentiment` as `null` (pending) —
+  the prior silent `sentiment: 0, confidence: 0.5` fallback is removed. Compass's
+  bracket-counting `extractValidJsonArray` is kept as a parse fallback.
+- **Evidence:** `lib/services/sentiment.service.ts`; `lib/services/news.service.ts` analysis
+  block. SDK support verified against
+  `node_modules/@google/generative-ai/dist/generative-ai.d.ts`: `GenerationConfig.responseMimeType`
+  (L691), `.responseSchema` (L697), `ResponseSchema = Schema` (L1204), `SchemaType` enum (L1252).
+- **Tradeoffs:** `responseSchema` makes the response shape an API-enforced contract rather
+  than a prompt request, which removes the hand-rolled index-echo and reordering defenses an
+  earlier draft of this decision required. It costs a hard dependency on the schema feature
+  being supported by every model in the ADR-32 chain — verified per model before commit. One
+  batch remains a single point of failure for N articles where the fan-out degraded
+  per-article; mitigated by ADR-32's model chain and by leaving unanalysed articles `null`
+  (already excluded from the aggregate and rendered "PENDING"), which is strictly more honest
+  than the fabricated neutral it replaces.
+- **Status:** accepted
+- **Confidence:** High — raised from the earlier draft's Medium: the schema removes the
+  parse-shape risk, and ADR-32 removes the single-model risk that drove the original rating.
+
+## ADR-32 — Gemini calls try an ordered model chain instead of one pinned model
+- **Decision:** `lib/services/gemini.ts` exports an ordered `GEMINI_MODELS` chain, tried in
+  sequence until one succeeds. `GEMINI_MODEL` remains exported as the chain's first entry so
+  existing consumers and tests are unaffected. The chain leads with the currently
+  live-verified `gemini-2.5-flash`; Compass's list is deliberately not copied, because it
+  includes `gemini-1.5-flash` — the exact model Google retired out from under this project
+  in 2026 (`plans/2026-07-20-gemini-model-update.md`).
+- **Evidence:** `lib/services/gemini.ts` (`GEMINI_MODELS`, `GEMINI_MODEL` as chain head);
+  pattern ported from `Compass/src/lib/news/gemini.ts:1-46`.
+- **Tradeoffs:** A failing primary now costs extra latency (a failed round-trip before the
+  fallback) instead of failing fast, and outputs can differ subtly between models, so a
+  score may shift depending on which model served it. Accepted: this project has already
+  been broken once by a single pinned model being retired, and a silently degraded score is
+  preferable to a whole tab returning nothing. Every model in the chain must be
+  live-verified before commit — an unverified fallback is worse than none.
+- **Status:** accepted
+- **Confidence:** High
+
+## ADR-33 — NewsAPI is removed; ADR-7's non-deployment condition no longer gates production
+- **Decision:** Supersedes ADR-7. `NEWS_API_KEY` and all NewsAPI code are removed from the
+  application. The leaked key remains live and publicly readable in git history (commits
+  `2a6c4c1a`, `3855042e`) and is still not revocable — removing the consumer does **not**
+  unpublish or revoke it. What changes is that nothing in the app can spend the quota, so
+  ADR-7's validity condition ("this app is not in production") no longer carries any weight:
+  a deploy cannot be affected by exhaustion of a quota the app never calls. TD-01 is
+  therefore downgraded (Medium → Low) and its blocking precondition on production deploys is
+  lifted, but TD-01 is **not closed** — the real remediation is deleting the newsapi.org
+  account.
+- **Evidence:** `lib/services/news.service.ts` (sole consumer, removed by this plan — ADR-7's
+  own Evidence line and `git grep NEWS_API_KEY` both confirm sole-consumer status);
+  `.env.example` (entry removed); `TECH_DEBT.md` TD-01 (amended); `.gitleaks.toml`
+  `newsapi-key` rule (deliberately retained — the secret is still in history, and deleting a
+  detector is not fixing a leak).
+- **Tradeoffs:** The residual exposure is a public, unrevocable key on an unused free-tier
+  account — an annoyance rather than a risk to data, users, or availability. `secret-history`
+  CI stays `continue-on-error` because gitleaks matches shapes in history and cannot know a
+  value is unused, so it will keep reporting this finding; tightening that gate still
+  requires a history scrub or a fingerprint-suppressed history-scoped ignore file (TD-28).
+- **Status:** accepted
+- **Confidence:** High
+
+## ADR-34 — Google News RSS replaces NewsAPI as the volume source, parsed with cheerio
+- **Decision:** The news source set becomes **Yahoo Finance `search()` (precision) + Google
+  News RSS (volume)**. NewsAPI is removed rather than demoted. RSS is fetched keylessly via
+  native `fetch` + `AbortController` and parsed with **`cheerio` in `xmlMode: true`** — already
+  a dependency of this repo (`package.json`, actively maintained) with zero prior call
+  sites. `rss-parser` (the reference implementation's choice) is deliberately **not** added:
+  it was last published April 2023 and pulls in `xml2js`, and adding a stale dependency chain
+  is unjustified when an installed, maintained parser handles the feed. Publisher name comes
+  from each item's `<source>` element and the matching `" - " + source` suffix is stripped
+  from the title.
+- **Rationale (live-probed 2026-07-24, one keyless request):** NewsAPI's free tier is delayed
+  **24 hours**, which makes it structurally incapable of explaining a same-day selloff
+  regardless of tuning. The RSS feed returned **100 items**, `200 application/xml`, carrying
+  the exact capex-selloff coverage the pipeline missed (CNBC, Investopedia, Barron's,
+  MarketWatch, Yahoo Finance) from publishers NewsAPI's free tier does not serve. Parse
+  contract verified on the live response: 100/100 items carry `<source>`; 100/100 titles end
+  in exactly `" - " + source`; **0** contain a second `" - "` (so suffix stripping cannot
+  truncate a headline).
+- **Evidence:** `lib/services/news.service.ts` (`fetchNewsAPI` removed, `fetchGoogleNewsRSS`
+  added); `lib/services/__fixtures__/google-news-googl.xml` (captured live response backing
+  the parser tests).
+- **Tradeoffs:** Three, all accepted. (1) **Lower precision** — 4 of 100 probe items were
+  about a different company, so ADR-30's relevance filter becomes load-bearing rather than
+  a safety net. (2) **Dirty data** — the probe reproduced a literal `META_TITLE_QUOTE`
+  placeholder title, requiring a junk-title guard; assume more such artifacts exist. (3)
+  **Unversioned, undocumented, unsupported feed** — Google can change or withdraw it without
+  notice; mitigated by defensive parsing, a hard timeout, and returning `[]` on any failure
+  so Yahoo alone still serves the tab. A further consequence: RSS `<link>` values are Google
+  redirect URLs, never publisher URLs, so cross-source dedup must key on normalized title
+  (URL dedup can never match across the two sources) and `NewsArticle.url` stores the
+  redirect for RSS rows.
+- **Status:** accepted
+- **Confidence:** High
+
+## ADR-35 — The News & sentiment headline score is computed by one shared helper, not three mirrored call sites
+- **Decision:** The weighted-average-sentiment → calibrated map → sample-damping pipeline is
+  extracted into a single exported helper, `computeSentimentScore(articles)`, in
+  `lib/utils/research-scores.ts`, consumed unchanged by `components/news-feed.tsx`,
+  `components/overview.tsx`, and `lib/services/wishlist.service.ts` (the latter's
+  `calculateSentimentScore` is now a one-line delegate). The three sites no longer each own a
+  copy of the article-filtering, weighting, and counting logic — only the shared helper does.
+  Articles with `sentiment === null` are excluded from the weighted average at all three sites
+  (previously news-feed excluded them while overview/wishlist coerced them to 0 — a pending
+  article is not neutral news, and Task 9 made `null` a routinely reachable state). Relevance
+  filtering uses only the server-side `MIN_RELEVANCE` filter already applied by
+  `getAnalyzedNewsForSymbol`; the last hardcoded `0.5` literal (`news-feed.tsx:53`) is removed
+  rather than replaced with a second, redundant client-side check.
+- **Evidence:** `lib/utils/research-scores.ts` (`computeSentimentScore`); `components/news-feed.tsx`,
+  `components/overview.tsx`, `lib/services/wishlist.service.ts` (all three call it directly);
+  `lib/utils/research-scores.cross-site.test.ts` (rewritten to exercise the real call sites
+  instead of asserting a pure function is deterministic against itself).
+- **Tradeoffs:** Task 11 originally tried to keep the three in sync by convention plus a
+  consistency test; the test was tautological (review finding NSA-I2) and the sites diverged by
+  up to 1.2 points in measured cases (NSA-I1). Structural sharing costs a slightly less flexible
+  per-site computation — accepted, because the divergence it prevents is user-visible on a single
+  page (the News tab headline versus the Overview composite's sentiment dimension).
+- **Status:** accepted
+- **Confidence:** High
+
+## ADR-36 — Relevance scoring caps per-field contribution and demotes 13F/institutional-holdings boilerplate by title shape
+- **Decision:** Fixes a regression found in the owner's manual checks of `plans/2026-07-24-news-sentiment-accuracy.md` (ADR-30's scorer), before it merged. Two changes to `scoreRelevance` (`lib/utils/news-relevance.ts`): (1) each field (title/summary/content) now contributes **at most one flat band** (`TITLE_MATCH_SCORE = 0.5`, `SUMMARY_MATCH_SCORE = 0.2`, `CONTENT_MATCH_SCORE = 0.1`) regardless of how many derived tokens match within that field — the original scorer added the band **per matching token**, so a title matching both the ticker and company-core tokens (an ordinary shape for ticker-stuffed institutional-holdings boilerplate) hit the `1.0` ceiling before the `+0.3` symbols bonus was even added, and nearly every article converged on `1.0`. (2) A new title-shape check, `BOILERPLATE_TITLE_PATTERNS` (a small regex set matching 13F/institutional-holdings filing-notice phrasing — "X Buys/Sells/Acquires N Shares of Y", "Shares Sold/Bought by X", "Boosts/Grows/... Stock Position/Stake in", "Has $N Million Stake in"), multiplies the score by `BOILERPLATE_DEMOTION_FACTOR = 0.5` when matched — demoting rather than discarding, since these articles are technically on-topic. Also fixed in the same pass: `deriveMatchTokens` no longer leaks a malformed `"alphabet ."` token (trailing-punctuation trim widened from `/[,\s]+$/` to `/[,.\s]+$/`, plus internal-whitespace collapse after `CORP_SUFFIX` removal).
+  **Amended (review iteration 3, NSA3-Q1 owner decision (b) + NSA3-S1):** `BOILERPLATE_TITLE_PATTERNS` now requires an **institutional-actor anchor** — an actor name immediately followed by one of `INSTITUTIONAL_ACTOR_SUFFIX` (LLC, LP, Inc., Trust, Advisors, Management, Capital, Partners, Group, Wealth, Asset (Management), Retirement System, Bank, Bancorp, Financial, Investments, Holdings, Fund, Co., S.A.) — combined with the holdings verb/noun phrasing. The original pattern set matched the verb+noun phrasing alone with no actor anchor at all, despite the code comment already (incorrectly) claiming the narrower match; iteration 3 measured 12 false positives across 20 probed real-headline shapes (corporate-action narrative, insider 10b5-1 transactions, index/notable-investor rebalances — e.g. "SoftBank trims stake in Alphabet to fund AI buildout", "Alphabet shares sold by CEO Sundar Pichai under 10b5-1 plan"), all from the missing anchor. Re-verified against both the false-positive set (must NOT demote) and the original true-13F set (must still demote) — see `lib/utils/news-relevance.test.ts`.
+  **Amended again (review iteration 4, NSA4-I1):** the institutional-actor anchor's own suffix satisfies itself when the "actor" is the requested company's own name — e.g. `"Alphabet Inc. Buys 100,000 Shares of Anthropic in AI push"` matched pattern 1 (actor "Alphabet Inc." + suffix "Inc." + verb "Buys" + noun "Shares of") and was wrongly demoted to `0.40`, reintroducing the exact NSA3-Q1 false-positive class (a genuine corporate-action headline about the subject company itself) through a different route than the one NSA3-Q1 closed. Fixed via **self-exclusion**: `ACTOR_NAME`'s actor-name segment is now a capture group, and `isBoilerplateFilingTitle(title, companyTokens)` rejects a would-be match when the captured actor segment word-boundary-matches one of the requested company's own name-derived tokens (`deriveCompanyNameTokens`, a new helper factored out of `deriveMatchTokens` — company-name tokens only, deliberately excluding the bare ticker, which is too short to safely word-boundary-match an arbitrary actor name). This is a strict narrowing of an existing match (it can only ever *un*-demote a title that would otherwise be demoted), so it cannot reintroduce a false negative — a genuine third-party institutional filer (e.g. "Berkshire Hathaway Inc.") reporting a stake in the subject company is unaffected and still demotes correctly. Also widened `INSTITUTIONAL_ACTOR_SUFFIX` with `Lllp`, `Corp`, `Associates` — real live-measured MarketBeat-style filer-name shapes the list was missing (pure alternation additions, narrows nothing). **NSA4-I1's other finding — the anchor's positional-adjacency requirement (no words allowed between the suffix and the verb) still produces false negatives for filer names with trailing words (e.g. "... Inc. CA", "Retirement System of Texas", "Pension Fund D") — is deliberately deferred, not fixed here.** Recorded as `TECH_DEBT.md` TD-43: the failure mode is benign (an undemoted 13F notice scores `0.80` and competes on equal footing rather than dominating, since the saturation fix already removed the crowding-out mechanism), and loosening the adjacency constraint risks resurrecting the NSA3-Q1 false-positive class without its own dedicated false-positive probe.
+- **Evidence:** `lib/utils/news-relevance.ts` (`scoreRelevance`, `BOILERPLATE_TITLE_PATTERNS`, `INSTITUTIONAL_ACTOR_SUFFIX`, `ACTOR_NAME` capture group, `isBoilerplateFilingTitle`, `actorSegmentIsSubjectCompany`, `deriveCompanyNameTokens`, `deriveMatchTokens`); `lib/utils/news-relevance.test.ts` (ranking assertions against the live-measured GOOGL headline set — CNBC/StockStory selloff coverage scored strictly above, and by more than `news.service.ts`'s `0.1` sort-preference gap, the MarketBeat 13F notices that had crowded them out; boilerplate-demotion tests covering both share-count word orders measured live; iteration-3 tests pinning the per-field flat-band property directly on non-boilerplate titles (NSA3-I1), the actor-anchor false-positive/true-positive regression set (NSA3-Q1), and the `MIN_RELEVANCE`/`BOILERPLATE_DEMOTION_FACTOR` coupling (NSA3-S1); iteration-4 self-exclusion tests (NSA4-I1) — the subject company's own corporate-action headlines undemoted, a genuine third-party filer ("Berkshire Hathaway Inc.") still demoted, and the corrected `news-relevance.test.ts:380` case (now carrying the "Inc." suffix a real filer name actually has, moved into the true-13F-shapes assertion since it now genuinely engages the anchor) — plus new `Corp`/`Lllp`/`Associates` suffix coverage). Live-verified against real GOOGL RSS+Yahoo data (`newsService.fetchNewsForSymbol`, scratch script deleted before commit per session discipline): MarketBeat/13F-shaped titles in the final 20-article set dropped from the reported 12/20 to 0/20, with RSS-sourced real reporting (CNBC/Barron's/Investopedia/MarketWatch-equivalent coverage) filling the freed slots. The saturation-fix regression tests were mutation-verified in iteration 3's fix pass: reverting `scoreRelevance` to the pre-fix per-token accumulation loop fails 5/28 tests in `news-relevance.test.ts` (was 0/23 before the targeted tests were added). The NSA4-I1 self-exclusion tests were mutation-verified in a throwaway `git worktree` (tracked tree never touched): disabling the self-exclusion check fails exactly the 3 new self-exclusion tests (29/32 pass, the third-party-filer sanity test unaffected); removing `Lllp`/`Corp`/`Associates` from the suffix list fails exactly the new suffix-coverage test (32/33 pass).
+- **Tradeoffs:** The boilerplate demotion is a narrow, regex-matched title-shape heuristic, not a structural "is this a filing notice" classifier — a publisher phrasing this plan's regex set doesn't cover will still score undemoted (mitigated: demotion is a multiplier on top of the saturation fix, not the sole defense, so an undemoted boilerplate item is capped at the same `1.0`/`0.8` band as genuine coverage rather than dominating by uncapped stacking as before). The saturation fix flattens same-field multi-token matches to one band, which slightly reduces the scorer's resolution within the "clearly relevant" range — for the RSS path specifically (the volume source, title-only, self-tagged `symbols`), the only two reachable values are `0.40` (demoted) and `0.80` (undemoted); `1.0` requires a summary/content match no RSS article carries, correcting an earlier overclaim of `0.5`/`0.8`/`1.0` clustering (NSA3-S1) — accepted, because the alternative (the pre-fix per-token accumulation) is the regression itself. **`(TITLE_MATCH_SCORE + SYMBOLS_MATCH_SCORE) × BOILERPLATE_DEMOTION_FACTOR = (0.5 + 0.3) × 0.5 = 0.40`, which lands exactly on `MIN_RELEVANCE = 0.4`** — a demoted RSS-sourced 13F notice survives only because `scoreRelevance`'s comparisons use `>=`; this coupling is now documented at `BOILERPLATE_DEMOTION_FACTOR`'s declaration and pinned by a dedicated test (NSA3-S1) so a future change to any of these four constants that breaks the relationship fails loudly. The actor-anchor tightening trades recall for precision: a genuinely institutional actor whose name doesn't happen to carry a recognized suffix (e.g. "Berkshire Hathaway" with no LLC/Inc./Trust-style suffix) is no longer demoted even if it is, in substance, routine portfolio-rebalancing coverage — accepted per the owner's NSA3-Q1 decision, since a bare-name institutional buy is also more often genuinely newsworthy (a large, named investor's position change) than an anonymous small-fund 13F notice. The self-exclusion fix (NSA4-I1) trades a small amount of recall for precision in the opposite direction it was needed: it can only ever un-demote, so its only cost is that a (hypothetical, unobserved) filer whose name happens to literally equal the subject company's name would also escape demotion — accepted as unreachable in practice, since an institutional filer and its subject company sharing an identical name is not a real-world shape. The positional-adjacency false-negative class (TD-43) remains open by deliberate choice, not oversight — see the amendment above. A known, explicitly out-of-scope residual: the scorer still cannot distinguish "mentions the company" from "is about the company" (an article about a different company that name-drops the requested one in its title still clears `MIN_RELEVANCE`) — tracked as `TECH_DEBT.md` TD-42, not fixed here, because a safe fix needs subject/entity extraction the current architecture has no signal for.
+- **Status:** accepted
+- **Confidence:** High
