@@ -221,9 +221,9 @@
 - **Status:** accepted
 - **Confidence:** High — the mapping is unit-tested against `buildPath`'s own vertex pixels and cross-checked against `gridlineYs`, including a deliberate revert-and-confirm-failure check during implementation (reverting the helper body to the un-padded formula makes 6 of the new tests fail, confirming they are not midpoint-only coverage); the pixel-level visual result is confirmable only by eye (TD-38: no component-render test seam) and is left to the owner's manual check per the PR body.
 
-## ADR-30 — Analyst rating score recentered (SCM-11); DCF Lite terminal multiple capped at 18 (SCM-05)
-- **Decision:** Two calibration choices from `reviews/2026-07-17-scoring-methodology.md` Phase 1
-  (`plans/2026-07-26-scoring-methodology-phase1-correctness.md`), both accepted per the review's
+## ADR-30 — Analyst rating score recentered (SCM-11); DCF Lite terminal multiple capped at 18 (SCM-05); Graham Number confidence defaulted to low (SCM-06)
+- **Decision:** Three calibration choices from `reviews/2026-07-17-scoring-methodology.md` Phase 1
+  (`plans/2026-07-26-scoring-methodology-phase1-correctness.md`), all accepted per the review's
   own recommendation with no further owner input required (review's "Ready for Coding agent"
   gate): (1) `AnalystRatingsService.calculateScore`'s rating-to-score mapping is recentered from
   StrongBuy=10/Buy=8/Hold=5/Sell=2/StrongSell=0 to StrongBuy=9/Buy=7/Hold=4/Sell=1.5/StrongSell=0
@@ -234,12 +234,18 @@
   the old 7/5.5/4.5/3) so labels stay sensible against the new score range. (2) DCF Lite's terminal
   P/E multiple is capped at `min(trailingPE, 18)` (was `min(trailingPE, <50)`, i.e. effectively
   uncapped for most stocks) — the stock's own uncapped current multiple was circular, granting an
-  expensive stock an expensive exit multiple that validates its own price.
+  expensive stock an expensive exit multiple that validates its own price. (3) Graham Number's
+  ensemble confidence is unconditionally `low` (was `high` — 3× ensemble weight — whenever
+  eps/bookValue were present) — Graham Number is the least applicable of the five intrinsic-value
+  methods for a modern asset-light equity (its 1934-era book-value ceilings read "overvalued"
+  permanently for a company that holds value in intangibles, not book value), so it should never
+  have outweighed the other four methods by construction.
 - **Evidence:** `lib/services/analyst-ratings.service.ts:193-224` (`calculateScore`,
   `getScoreInterpretation`), `lib/services/analyst-ratings.service.test.ts` ("SCM-11 recentered
   rating mapping" describe block); `lib/services/intrinsic-value.service.ts:112-159`
-  (`calculateDCFLite`'s `TERMINAL_PE_CAP = 18`), `lib/services/intrinsic-value.service.test.ts`
-  ("SCM-05 terminal multiple cap" describe block).
+  (`calculateDCFLite`'s `TERMINAL_PE_CAP = 18`), `:168-196` (`calculateGrahamNumber`'s
+  `confidence: 'low'`), `lib/services/intrinsic-value.service.test.ts` ("SCM-05 terminal multiple
+  cap" and "SCM-06 confidence default" describe blocks).
 - **Tradeoffs:** (1) is a calibration choice, not a structural fix — the review's higher-value
   options (revision-momentum from the already-persisted `upgradeDowngradeHistory`, or a
   cross-sectional percentile) would extract more signal from the same data but need materially
@@ -250,8 +256,15 @@
   on next-deploy — a known lag, not a blocker. (2) An 18x cap is a documented, arbitrary ceiling,
   not a sector-aware terminal multiple (SCM-14, not yet built) — a genuinely justified premium
   compounder is capped identically to a mediocre business at the same trailing P/E; this is the
-  explicitly-scoped interim fix, not the final design.
+  explicitly-scoped interim fix, not the final design. (3) A permanent `low` confidence for Graham
+  Number means it can never regain influence in the ensemble even for the sectors where book value
+  genuinely is economically meaningful (financials, insurers, asset-heavy industrials) until SCM-14
+  (sector data) lands and a sector-gated elevation is built — an explicit, accepted interim
+  under-weighting, not a final design either.
 - **Status:** accepted
-- **Confidence:** High — both changes are pure, unit-tested, and match the review's stated
+- **Confidence:** High — all three changes are pure, unit-tested, and match the review's stated
   recommendation verbatim; the plan's Assumptions section states approving the plan approves the
-  review's recommended direction for all of SCM-01…13 with no further owner sign-off gate.
+  review's recommended direction for all of SCM-01…13 with no further owner sign-off gate. SCM-06
+  was missing from the plan's own Tasks/Files-to-modify lists despite being named in the plan's
+  title, Problem section, and Approach's "Key decisions" — the Coding agent found and closed this
+  drafting gap in-session (see the plan file and `AGENT.md`'s corresponding fragile-surface note).

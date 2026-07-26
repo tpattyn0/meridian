@@ -164,6 +164,19 @@ export class IntrinsicValueService {
   /**
    * Graham Number Method
    * Formula: √(15 × EPS × 1.5 × Book Value)
+   *
+   * SCM-06 (reviews/2026-07-17-scoring-methodology.md,
+   * plans/2026-07-26-scoring-methodology-phase1-correctness.md): this method
+   * was previously assigned `high` confidence (3x weight in the ensemble
+   * average, see calculateWeightedAverage) whenever eps/bookValue were
+   * present. It is the LEAST applicable method for modern asset-light
+   * equities — it encodes 1934-era book-value ceilings (P/E 15 x P/B 1.5)
+   * that permanently read "overvalued" for a software/services company that
+   * holds its value in intangibles, not book value. Defaulted to `low`
+   * confidence (1x weight) regardless of data availability; sector-gated
+   * elevation to medium/high for book-value-relevant sectors (financials,
+   * insurers, asset-heavy industrials) is SCM-14, out of scope here (no
+   * sector data exists yet).
    */
   private static calculateGrahamNumber(data: FundamentalData): ValuationMethod {
     const eps = data.eps;
@@ -182,7 +195,7 @@ export class IntrinsicValueService {
         eps,
         bookValue,
       },
-      confidence: value && eps && eps > 0 && bookValue && bookValue > 0 ? 'high' : 'low',
+      confidence: 'low',
     };
   }
 

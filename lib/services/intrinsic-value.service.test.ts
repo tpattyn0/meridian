@@ -206,3 +206,53 @@ describe("IntrinsicValueService.calculateDCFLite — SCM-13 missing vs reported-
     expect(dcfLite?.value as number).toBeCloseTo(expected, 2);
   });
 });
+
+/**
+ * SCM-06 (reviews/2026-07-17-scoring-methodology.md,
+ * plans/2026-07-26-scoring-methodology-phase1-correctness.md): Graham Number
+ * was assigned `high` confidence (3x ensemble weight) whenever eps/bookValue
+ * were present — the LEAST applicable method for modern asset-light equities
+ * (1934-era book-value ceilings). Fixed: always `low` confidence (1x weight)
+ * regardless of data availability. Sector-gated elevation is SCM-14, out of
+ * scope here.
+ */
+describe("IntrinsicValueService.calculateGrahamNumber — SCM-06 confidence default", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    findUniqueIndustryMock.mockResolvedValue(null);
+  });
+
+  it("assigns low confidence to Graham Number even when eps/bookValue are both present and valid", async () => {
+    findUniqueFundamentalMock.mockResolvedValueOnce({
+      symbol: "GRAHAMCO",
+      eps: 6,
+      bookValue: 4,
+      peRatio: null,
+      pegRatio: null,
+      earningsGrowth: null,
+    });
+
+    const result = await IntrinsicValueService.calculateIntrinsicValue("GRAHAMCO", 100);
+
+    const graham = result.methods.find((m) => m.name === "Graham Number");
+    expect(graham?.value).not.toBeNull();
+    expect(graham?.confidence).toBe("low");
+  });
+
+  it("assigns low confidence when Graham Number's inputs are missing too (unchanged)", async () => {
+    findUniqueFundamentalMock.mockResolvedValueOnce({
+      symbol: "NOGRAHAMDATA",
+      eps: null,
+      bookValue: null,
+      peRatio: null,
+      pegRatio: null,
+      earningsGrowth: null,
+    });
+
+    const result = await IntrinsicValueService.calculateIntrinsicValue("NOGRAHAMDATA", 100);
+
+    const graham = result.methods.find((m) => m.name === "Graham Number");
+    expect(graham?.value).toBeNull();
+    expect(graham?.confidence).toBe("low");
+  });
+});

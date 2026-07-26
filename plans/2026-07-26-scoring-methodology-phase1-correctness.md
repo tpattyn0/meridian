@@ -208,6 +208,17 @@ Ordered by file. `[ ]` todo · `[~]` in progress · `[x]` done (acceptance passe
     value is still produced. Depends on SCM-01 restoring `0` at extraction so a reported 0
     reaches this method as `0`, not `null`.
 
+14. [x] **SCM-06** — **(added during implementation — drafting gap: the Approach section's
+    "Key decisions" already stated this fix and the plan title/Problem section list SCM-06 as
+    in scope, but no numbered Task or Files-to-modify line existed for it; the Coding agent
+    session found and closed the gap rather than silently skipping a review finding the plan
+    otherwise committed to.)** In `calculateGrahamNumber`, default confidence to `low`
+    unconditionally (was `high` whenever eps/bookValue were present — 3× ensemble weight for
+    the least-applicable method for asset-light equities). Sector-gated elevation is SCM-14,
+    out of scope.
+    — Acceptance: unit tests — Graham Number confidence is `low` both when its inputs are
+    present (value computed) and when absent (value null). `npm run verify` green.
+
 ### `lib/services/analyst-ratings.service.ts`
 
 13. [x] **SCM-11** — Recenter the rating mapping in `calculateScore` to SB=9, B=7, H=4,
@@ -226,7 +237,7 @@ Ordered by file. `[ ]` todo · `[~]` in progress · `[x]` done (acceptance passe
 - `lib/services/technical-analysis.service.test.ts` — tests
 - `lib/services/wishlist.service.ts` — SCM-03 (consumer)
 - `lib/services/wishlist.service.test.ts` — test
-- `lib/services/intrinsic-value.service.ts` — SCM-05, SCM-13
+- `lib/services/intrinsic-value.service.ts` — SCM-05, SCM-13, SCM-06 (added during implementation)
 - `lib/services/intrinsic-value.service.test.ts` — tests
 - `lib/services/analyst-ratings.service.ts` — SCM-11
 - `lib/services/analyst-ratings.service.test.ts` — tests
