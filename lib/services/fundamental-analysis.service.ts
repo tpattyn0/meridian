@@ -207,7 +207,16 @@ export class FundamentalAnalysisService {
     const summaryDetail = data.summaryDetail || {};
     const defaultKeyStatistics = data.defaultKeyStatistics || {};
     const financialData = data.financialData || {};
-    const earningsTrend = data.earningsTrend?.trend?.[0]?.earningsEstimate;
+    // SCM-P1-S2: Yahoo's earningsTrend.trend[] is ordered by period
+    // ("0q","+1q","0y","+1y","+5y","-5y", not indexed by recency) — trend[0]
+    // is the CURRENT-QUARTER estimate, not the long-term "+5y" figure the
+    // PEG fallback below is meant to use. Select the "+5y" entry explicitly
+    // by its `period` field; fall back to "+1y" (next-year) if +5y is
+    // absent from the fetched payload, then to trend[0] as a last resort so
+    // a missing/reshaped payload still degrades to the old behavior instead
+    // of throwing.
+    const earningsTrendEntry = this.selectLongTermEarningsTrend(data.earningsTrend?.trend);
+    const earningsTrend = earningsTrendEntry?.earningsEstimate;
 
 
     // Calculate EPS (Earnings Per Share)
@@ -250,12 +259,13 @@ export class FundamentalAnalysisService {
     // Calculate PEG Ratio
     // PEG = P/E / (Growth Rate * 100)
     // SCM-12: prefer Yahoo's own PEG; then the analyst forward growth
-    // estimate from earningsTrend (multi-year expected growth, not a single
-    // noisy YoY print); only then the single-year YoY fallback (low-
-    // confidence — no 3-year historical EPS CAGR is available from the
-    // Yahoo modules this service fetches, so that middle tier is not
-    // implementable without a new data source; flagged here for a future
-    // pass rather than silently treated as done).
+    // estimate from earningsTrend's "+5y" (falling back to "+1y") entry —
+    // see selectLongTermEarningsTrend — the multi-year expected growth PEG
+    // is conventionally defined on, not a single noisy YoY print; only then
+    // the single-year YoY fallback (low-confidence — no 3-year historical
+    // EPS CAGR is available from the Yahoo modules this service fetches, so
+    // that middle tier is not implementable without a new data source;
+    // flagged here for a future pass rather than silently treated as done).
     let pegRatio = defaultKeyStatistics.pegRatio || null;
 
     if (!pegRatio && peRatio && peRatio > 0) {
@@ -313,6 +323,27 @@ export class FundamentalAnalysisService {
     };
   }
 
+  /**
+   * SCM-P1-S2: Yahoo's `earningsTrend.trend[]` array is ordered by
+   * `period` — typically `["0q","+1q","0y","+1y","+5y","-5y"]` — not by
+   * "most relevant first". `trend[0]` is therefore the current-quarter
+   * estimate, not the long-term growth figure PEG is conventionally
+   * defined on. This selects the `+5y` entry by its `period` field
+   * (long-term expected growth); if the fetched payload doesn't include a
+   * `+5y` entry, falls back to `+1y` (next-year, still a multi-period
+   * analyst estimate rather than a single quarter); if neither is present,
+   * falls back to `trend[0]` so a reshaped/partial payload still degrades
+   * gracefully instead of losing the PEG fallback entirely.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private selectLongTermEarningsTrend(trend: Array<Record<string, any>> | undefined): Record<string, any> | undefined {
+    if (!Array.isArray(trend) || trend.length === 0) return undefined;
+    return (
+      trend.find((t) => t?.period === '+5y') ||
+      trend.find((t) => t?.period === '+1y') ||
+      trend[0]
+    );
+  }
 
   private calculateFundamentalScore(metrics: Omit<FundamentalMetrics, 'score'>): { total: number; breakdown: { valuation: number; profitability: number; growth: number; financial: number; dividend: number; }; interpretation: string; } {
     const breakdown = {

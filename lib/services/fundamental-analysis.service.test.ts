@@ -572,3 +572,78 @@ describe("FundamentalAnalysisService — SCM-12 PEG fallback growth source", () 
     expect(result.valuation.pegRatio).toBeCloseTo(20 / (0.25 * 100), 2);
   });
 });
+
+/**
+ * SCM-P1-S2: `earningsTrend.trend[]` is ordered by Yahoo's `period` field
+ * ("0q","+1q","0y","+1y","+5y","-5y"), not by relevance — `trend[0]` is the
+ * CURRENT-QUARTER estimate, not the long-term "+5y" growth figure the PEG
+ * fallback is meant to use. `selectLongTermEarningsTrend` must pick the
+ * entry explicitly by `period`, preferring "+5y", then "+1y", then falling
+ * back to `trend[0]` only if neither is present.
+ */
+describe("FundamentalAnalysisService — SCM-P1-S2 earningsTrend +5y selection", () => {
+  let service: FundamentalAnalysisService;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    findUniqueMock.mockResolvedValue(null);
+    upsertMock.mockResolvedValue({});
+    service = new FundamentalAnalysisService();
+  });
+
+  it("selects the +5y entry over trend[0] (current-quarter) when both are present, in Yahoo's real array order", async () => {
+    safeQuoteSummaryMock.mockResolvedValueOnce({
+      price: { regularMarketPrice: 100, marketCap: 2_000_000_000 },
+      summaryDetail: { trailingPE: 20 },
+      earningsTrend: {
+        // Realistic Yahoo ordering: current-quarter first, +5y near the end.
+        trend: [
+          { period: "0q", earningsEstimate: { growth: 4.0 } }, // would wrongly dominate under the old trend[0] bug
+          { period: "+1q", earningsEstimate: { growth: 0.9 } },
+          { period: "0y", earningsEstimate: { growth: 0.6 } },
+          { period: "+1y", earningsEstimate: { growth: 0.2 } },
+          { period: "+5y", earningsEstimate: { growth: 0.15 } },
+          { period: "-5y", earningsEstimate: { growth: 0.1 } },
+        ],
+      },
+    });
+
+    const result = await service.fetchFundamentals("LONGTERMGROWTH");
+
+    // If trend[0] ("0q", growth 4.0) were used, PEG would be 20/400 = 0.05.
+    // The +5y entry (growth 0.15) should be used instead: PEG = 20/15.
+    expect(result.valuation.pegRatio).toBeCloseTo(20 / (0.15 * 100), 2);
+    expect(result.valuation.pegRatio).not.toBeCloseTo(20 / (4.0 * 100), 2);
+  });
+
+  it("falls back to +1y when +5y is absent from the payload", async () => {
+    safeQuoteSummaryMock.mockResolvedValueOnce({
+      price: { regularMarketPrice: 100, marketCap: 2_000_000_000 },
+      summaryDetail: { trailingPE: 20 },
+      earningsTrend: {
+        trend: [
+          { period: "0q", earningsEstimate: { growth: 4.0 } },
+          { period: "+1y", earningsEstimate: { growth: 0.2 } },
+        ],
+      },
+    });
+
+    const result = await service.fetchFundamentals("NEXTYEARGROWTH");
+
+    expect(result.valuation.pegRatio).toBeCloseTo(20 / (0.2 * 100), 2);
+  });
+
+  it("falls back to trend[0] when neither +5y nor +1y is present (old behavior preserved for a reshaped payload)", async () => {
+    safeQuoteSummaryMock.mockResolvedValueOnce({
+      price: { regularMarketPrice: 100, marketCap: 2_000_000_000 },
+      summaryDetail: { trailingPE: 20 },
+      earningsTrend: {
+        trend: [{ period: "0q", earningsEstimate: { growth: 0.12 } }],
+      },
+    });
+
+    const result = await service.fetchFundamentals("NOPERIODFIELDS");
+
+    expect(result.valuation.pegRatio).toBeCloseTo(20 / (0.12 * 100), 2);
+  });
+});

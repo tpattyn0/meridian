@@ -222,7 +222,14 @@ export class AnalystRatingsService {
     // SCM-11: thresholds shifted down to track the recentered calculateScore
     // mapping above (SB=9/B=7/H=4/S=1.5/SS=0) so the interpretation labels
     // stay sensible at the new boundaries rather than everything reading
-    // "Buy"/"Strong Buy" under the old 1-10-scale thresholds.
+    // "Buy"/"Strong Buy" under the old 1-10-scale thresholds. These
+    // boundaries are shared with `analystVerdictLabel` in
+    // `lib/utils/research-scores.ts` (SCM-P1-I1) — keep the two in
+    // lockstep. That helper lives in `lib/utils`, not here, because this
+    // service imports `prisma`/`@prisma/client` and is unsafe to import
+    // from a `"use client"` component (would bundle the Prisma client into
+    // client JS); `lib/utils/research-scores.ts` is dependency-free and
+    // already the shared home for cross-tab score-label helpers.
     if (score >= 6) return 'Strong Buy - Analysts are very bullish on this stock';
     if (score >= 4.5) return 'Buy - Analysts are generally positive about this stock';
     if (score >= 3) return 'Hold - Analysts are neutral on this stock';
@@ -288,7 +295,12 @@ export class AnalystRatingsService {
       strongSell: cached.strongSell,
       totalAnalysts: cached.totalAnalysts,
       averageRating: cached.averageRating ? Number(cached.averageRating) : null,
-      score: cached.score || 5,
+      // SCM-P1-S1: was `cached.score || 5`, a falsy check that silently
+      // collapsed a genuine analyst score of exactly 0 (a valid post-SCM-11
+      // clamp-floor value — a pure Strong-Sell consensus) to the neutral
+      // "no data" placeholder on every 24h cache-hit read. `??` only
+      // substitutes on null/undefined, so a real 0 now survives.
+      score: cached.score ?? 5,
       scoreInterpretation: cached.scoreInterpretation || 'No analyst data available',
       lastUpdated: cached.lastUpdated?.toISOString() || new Date().toISOString()
     };

@@ -5,6 +5,7 @@ import { AlertCircle } from "lucide-react";
 import { HeadlineScoreCard } from "@/components/research/headline-score-card";
 import { cn } from "@/lib/utils";
 import { formatCurrency } from "@/lib/utils/format";
+import { analystVerdictLabel } from "@/lib/utils/research-scores";
 
 export interface AnalystRevisionData {
   firm: string;
@@ -118,8 +119,11 @@ export function AnalystRatings({ symbol, currentPrice, initialData, currency }: 
     priceDifference = { value: diff, formatted: `${diff >= 0 ? "+" : ""}${diff.toFixed(1)}%` };
   }
 
-  const verdictLabel =
-    ratings.score >= 7 ? "STRONG BUY" : ratings.score >= 5.5 ? "BUY" : ratings.score >= 4.5 ? "HOLD" : ratings.score >= 3 ? "SELL" : "STRONG SELL";
+  // SCM-P1-I1: derive from the shared helper (matches the service's own
+  // getScoreInterpretation boundaries) rather than a second inline copy of
+  // the thresholds, so the headline stamp cannot drift from the service's
+  // interpretation string again.
+  const verdictLabel = analystVerdictLabel(ratings.score);
 
   return (
     <div className="space-y-5">
