@@ -10,8 +10,9 @@ right role" discipline with tool-level enforcement (assessment P0-1.2 / SK-3).
 | `reviewer` | Opus | Yes (`reviews/`, `STATUS.md`, index files only — by instruction) | Audits branch HEAD only. Never application code. |
 | `planner` | Opus | Yes (docs/plans only, by instruction) | Writes plans and docs; reads plan-as-spec boundary preserved. |
 | `coding-agent` | Sonnet | Yes | Full access; branch -> Verify -> PR. Never merges. |
-| `gtm` | Opus | Yes (GTM.md + copy, by instruction) | `GTM.md` + standalone copy. |
+| `gtm` | Opus | Yes (GTM.md + copy, by instruction) | `GTM.md` + standalone copy. Holds `Agent` so it can spawn `project-bootstrap` on a new project. |
 | `designer` | Sonnet | Yes (DESIGN.md + specs, by instruction) | `DESIGN.md` + UI specs. |
+| `project-bootstrap` | Sonnet | Yes (framework files only, by instruction) | Mechanical Step 1 setup: mkdir, `git init`, `apply-framework.sh`, verify, report human-only steps. No product decisions, no docs, no GitHub repo. |
 
 **The key boundary** is on `reviewer`: it must never touch application code. That
 boundary is enforced **by instruction, not by tools.** The reviewer holds
