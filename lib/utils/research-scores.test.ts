@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { round1, sentimentToScore, upsideToScore, verdictLabel } from "./research-scores";
+import { analystVerdictLabel, round1, sentimentToScore, upsideToScore, verdictLabel } from "./research-scores";
 
 describe("sentimentToScore", () => {
   it("maps -1..1 sentiment onto 0..10", () => {
@@ -73,5 +73,41 @@ describe("verdictLabel", () => {
   it("the same score resolves to a different label depending on ownership context", () => {
     expect(verdictLabel(6, "wishlist")).toBe("WATCH");
     expect(verdictLabel(6, "portfolio")).toBe("REDUCE");
+  });
+});
+
+/**
+ * SCM-P1-I1: `analystVerdictLabel` must track the recentered SCM-11
+ * boundaries (SB=9/B=7/H=4/S=1.5/SS=0) that
+ * `AnalystRatingsService.getScoreInterpretation` uses — asserted here at the
+ * exact scores the review flagged as diverging under the old, pre-recenter
+ * component thresholds (6.5 -> old component said "BUY", service said
+ * "Strong Buy"; 4.6 -> old "HOLD" vs. service "Buy"; 3.5 -> old "SELL" vs.
+ * service "Hold"). A cross-check against the service's own
+ * `scoreInterpretation` string lives in
+ * `lib/services/analyst-ratings.service.test.ts` so the two cannot drift
+ * apart silently again.
+ */
+describe("analystVerdictLabel", () => {
+  it("matches the recentered getScoreInterpretation boundaries (SB=9/B=7/H=4/S=1.5/SS=0)", () => {
+    expect(analystVerdictLabel(9)).toBe("STRONG BUY");
+    expect(analystVerdictLabel(6)).toBe("STRONG BUY");
+    expect(analystVerdictLabel(5.9)).toBe("BUY");
+    expect(analystVerdictLabel(4.5)).toBe("BUY");
+    expect(analystVerdictLabel(4.4)).toBe("HOLD");
+    expect(analystVerdictLabel(3)).toBe("HOLD");
+    expect(analystVerdictLabel(2.9)).toBe("SELL");
+    expect(analystVerdictLabel(1.5)).toBe("SELL");
+    expect(analystVerdictLabel(1.4)).toBe("STRONG SELL");
+    expect(analystVerdictLabel(0)).toBe("STRONG SELL");
+  });
+
+  it("resolves the review's concrete divergence examples to the recentered label, not the stale pre-SCM-11 one", () => {
+    // Old (stale) component thresholds would have said "BUY" at 6.5.
+    expect(analystVerdictLabel(6.5)).toBe("STRONG BUY");
+    // Old thresholds would have said "HOLD" at 4.6.
+    expect(analystVerdictLabel(4.6)).toBe("BUY");
+    // Old thresholds would have said "SELL" at 3.5.
+    expect(analystVerdictLabel(3.5)).toBe("HOLD");
   });
 });

@@ -30,6 +30,7 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 import { AnalystRatingsService, filterRecentRevisions, AnalystRevision } from "./analyst-ratings.service";
+import { analystVerdictLabel } from "@/lib/utils/research-scores";
 
 /**
  * plans/2026-07-20-analyst-revisions-nvda-fix.md Task 1: filterRecentRevisions
@@ -288,5 +289,183 @@ describe("AnalystRatingsService — targetLow/High and revisions mapping", () =>
     expect(result.targetHighPrice).toBeNull();
     expect(result.revisions).toEqual([]);
     expect(safeQuoteSummaryMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * SCM-11 (reviews/2026-07-17-scoring-methodology.md,
+ * plans/2026-07-26-scoring-methodology-phase1-correctness.md): the old
+ * mapping (SB=10, B=8, H=5, S=2, SS=0) landed nearly every buy-skewed
+ * consensus at 6.5-8.5, injecting a near-constant bullish offset into 15% of
+ * the composite. Recentered to SB=9/B=7/H=4/S=1.5/SS=0 (review's option 3)
+ * so a typical buy-skewed distribution lands approximately 5-6.
+ */
+describe("AnalystRatingsService.calculateScore — SCM-11 recentered rating mapping", () => {
+  let service: AnalystRatingsService;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    findUniqueMock.mockResolvedValue(null);
+    upsertMock.mockResolvedValue({});
+    service = new AnalystRatingsService();
+  });
+
+  it("scores a realistic buy-skewed consensus (~55% buy / 40% hold / 5% sell) around 5-6, not 6.5-8.5", async () => {
+    safeQuoteSummaryMock.mockResolvedValueOnce({
+      financialData: { targetMeanPrice: 175 },
+      recommendationTrend: {
+        trend: [{ strongBuy: 0, buy: 55, hold: 40, sell: 5, strongSell: 0 }],
+      },
+    });
+
+    const result = await service.fetchAnalystRatings("TYPICAL");
+
+    expect(result.score).toBeGreaterThanOrEqual(5);
+    expect(result.score).toBeLessThanOrEqual(6);
+  });
+
+  it("still scores a genuine strong-buy consensus high", async () => {
+    safeQuoteSummaryMock.mockResolvedValueOnce({
+      financialData: { targetMeanPrice: 175 },
+      recommendationTrend: {
+        trend: [{ strongBuy: 18, buy: 2, hold: 0, sell: 0, strongSell: 0 }],
+      },
+    });
+
+    const result = await service.fetchAnalystRatings("STRONGBUY");
+
+    expect(result.score).toBeGreaterThanOrEqual(8);
+  });
+
+  it("scores a sell-heavy consensus low", async () => {
+    safeQuoteSummaryMock.mockResolvedValueOnce({
+      financialData: { targetMeanPrice: 50 },
+      recommendationTrend: {
+        trend: [{ strongBuy: 0, buy: 0, hold: 2, sell: 8, strongSell: 10 }],
+      },
+    });
+
+    const result = await service.fetchAnalystRatings("SELLHEAVY");
+
+    expect(result.score).toBeLessThanOrEqual(2);
+  });
+
+  it("keeps interpretation labels sensible at the recentered boundaries", async () => {
+    safeQuoteSummaryMock.mockResolvedValueOnce({
+      financialData: { targetMeanPrice: 175 },
+      recommendationTrend: {
+        trend: [{ strongBuy: 0, buy: 55, hold: 40, sell: 5, strongSell: 0 }],
+      },
+    });
+
+    const result = await service.fetchAnalystRatings("LABELCHECK");
+
+    expect(result.scoreInterpretation).toMatch(/Buy|Hold/);
+  });
+});
+
+/**
+ * SCM-P1-S1: `formatCachedData` (the 24h cache-hit read path) previously did
+ * `cached.score || 5` — a falsy check that silently collapsed a genuine
+ * analyst score of exactly 0 (valid since SCM-11 moved the clamp floor from
+ * 1 to 0 — a pure Strong-Sell consensus) to the neutral "no data" 5. Fixed
+ * to `cached.score ?? 5`, which only substitutes on null/undefined.
+ */
+describe("AnalystRatingsService.fetchAnalystRatings — cache-hit score 0 vs. missing (SCM-P1-S1)", () => {
+  let service: AnalystRatingsService;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    upsertMock.mockResolvedValue({});
+    service = new AnalystRatingsService();
+  });
+
+  function cachedRow(overrides: Partial<Record<string, unknown>> = {}) {
+    return {
+      id: "1",
+      symbol: "STRONGSELL",
+      targetPrice: null,
+      targetLowPrice: null,
+      targetHighPrice: null,
+      strongBuy: 0,
+      buy: 0,
+      hold: 0,
+      sell: 0,
+      strongSell: 10,
+      totalAnalysts: 10,
+      averageRating: null,
+      score: 0,
+      scoreInterpretation: "Strong Sell - Analysts are very bearish on this stock",
+      revisions: [],
+      lastUpdated: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      ...overrides,
+    };
+  }
+
+  it("preserves a genuine cached score of 0 rather than substituting the neutral 5", async () => {
+    findUniqueMock.mockResolvedValueOnce(cachedRow());
+
+    const result = await service.fetchAnalystRatings("STRONGSELL");
+
+    expect(result.score).toBe(0);
+    expect(result.score).not.toBe(5);
+  });
+
+  it("still substitutes the neutral 5 when the cached score is genuinely null/undefined", async () => {
+    // Prisma's Float column can't actually be null given the schema default,
+    // but the fallback must still behave correctly if it ever were.
+    findUniqueMock.mockResolvedValueOnce(cachedRow({ score: null as unknown as number }));
+
+    const result = await service.fetchAnalystRatings("STRONGSELL");
+
+    expect(result.score).toBe(5);
+  });
+});
+
+/**
+ * SCM-P1-I1: the review found that `components/analyst-ratings.tsx` computed
+ * its own verdict-stamp label inline with stale pre-recenter thresholds,
+ * silently disagreeing with `getScoreInterpretation` for most post-recenter
+ * scores. The fix extracts a single shared `analystVerdictLabel` helper
+ * (`lib/utils/research-scores.ts`) used by both the component and (via this
+ * cross-check) verified here to agree with the service's own interpretation
+ * string at representative post-recenter scores — this is the regression
+ * test the review noted was missing (the existing SCM-11 test only asserted
+ * the service's `scoreInterpretation`, never the component-facing label).
+ */
+describe("analystVerdictLabel agrees with AnalystRatingsService.scoreInterpretation (SCM-P1-I1)", () => {
+  let service: AnalystRatingsService;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    findUniqueMock.mockResolvedValue(null);
+    upsertMock.mockResolvedValue({});
+    service = new AnalystRatingsService();
+  });
+
+  it.each([
+    // [label, trend distribution, expected verdict word fragment]
+    // Distributions solved exactly against the SB=9/B=7/H=4/S=1.5/SS=0
+    // weighted-average formula to land on the review's own example scores.
+    ["a score of 6.5 (review's Strong-Buy example)", { strongBuy: 0, buy: 5, hold: 1, sell: 0, strongSell: 0 }, "Strong Buy"],
+    ["a score of 4.6 (review's Buy example)", { strongBuy: 0, buy: 1, hold: 4, sell: 0, strongSell: 0 }, "Buy"],
+    ["a score of 3.5 (review's Hold example)", { strongBuy: 0, buy: 0, hold: 4, sell: 1, strongSell: 0 }, "Hold"],
+    ["a score of exactly 1.5 (Sell boundary)", { strongBuy: 0, buy: 0, hold: 0, sell: 1, strongSell: 0 }, "Sell"],
+    ["a pure strong-sell consensus (score 0)", { strongBuy: 0, buy: 0, hold: 0, sell: 0, strongSell: 1 }, "Strong Sell"],
+  ])("%s: component label matches the service interpretation's verdict word", async (_label, trend, expectedWordFragment) => {
+    safeQuoteSummaryMock.mockResolvedValueOnce({
+      financialData: { targetMeanPrice: 175 },
+      recommendationTrend: { trend: [trend] },
+    });
+
+    const result = await service.fetchAnalystRatings(`AGREE-${expectedWordFragment.replace(/\s/g, "")}`);
+    const componentLabel = analystVerdictLabel(result.score);
+
+    // scoreInterpretation reads e.g. "Strong Buy - Analysts are..."; the
+    // component label reads e.g. "STRONG BUY". Compare case-insensitively.
+    expect(result.scoreInterpretation.toLowerCase()).toContain(expectedWordFragment.toLowerCase());
+    expect(componentLabel.toLowerCase()).toBe(expectedWordFragment.toLowerCase());
   });
 });

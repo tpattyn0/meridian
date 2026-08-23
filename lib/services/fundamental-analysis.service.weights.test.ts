@@ -58,7 +58,13 @@ describe("fetchFundamentals — per-user fundamental reweight (fresh path)", () 
     // Sanity: total is a real weighted average of the (already-rounded-to-1dp)
     // breakdown using defaults, rounded to 1dp the same way the service's own
     // calculateFundamentalScore rounds `total` (Math.round(x * 10) / 10).
-    const expected = weightedFundamentalTotal(result.score.breakdown, DEFAULT_SCORING_WEIGHTS.fundamental);
+    // SCM-10(a): this fixture mocks no dividend fields at all (a non-payer),
+    // so the dividend pillar is excluded and the total is renormalized over
+    // the other four pillars — the dividend weight must be zeroed here to
+    // match, not the raw DEFAULT_SCORING_WEIGHTS.fundamental (which still
+    // carries a 5% dividend weight).
+    const nonPayerWeights = { ...DEFAULT_SCORING_WEIGHTS.fundamental, dividend: 0 };
+    const expected = weightedFundamentalTotal(result.score.breakdown, nonPayerWeights);
     expect(result.score.total).toBeCloseTo(Math.round(expected * 10) / 10, 10);
   });
 
@@ -78,7 +84,11 @@ describe("fetchFundamentals — per-user fundamental reweight (fresh path)", () 
     expect(upsertMock).toHaveBeenCalledTimes(1);
     const savedData = upsertMock.mock.calls[0][0].create;
     const savedScore = JSON.parse(JSON.stringify(savedData.scoreDetails));
-    const expectedDefaultTotal = weightedFundamentalTotal(savedScore.breakdown, DEFAULT_SCORING_WEIGHTS.fundamental);
+    // SCM-10(a): same non-payer renormalization as the test above — this
+    // fixture mocks no dividend fields, so the persisted default-weighted
+    // total is computed with the dividend weight zeroed too.
+    const nonPayerWeights = { ...DEFAULT_SCORING_WEIGHTS.fundamental, dividend: 0 };
+    const expectedDefaultTotal = weightedFundamentalTotal(savedScore.breakdown, nonPayerWeights);
     expect(savedData.fundamentalScore).toBeCloseTo(Math.round(expectedDefaultTotal * 10) / 10, 10);
   });
 });

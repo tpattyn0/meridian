@@ -228,7 +228,7 @@ function FundamentalOverviewSubView({ data }: { data: FundamentalMetricsResponse
       rows: [
         { label: "Dividend yield", value: fmtPercent(data.dividend.yield), grade: metricGrade(data.dividend.yield, { goodThreshold: 0.02, badThreshold: 0 }) },
         { label: "Payout ratio", value: fmtPercent(data.dividend.payoutRatio), grade: metricGrade(data.dividend.payoutRatio, { goodThreshold: 0.6, badThreshold: 0.9, inverse: true }) },
-        { label: "5Y dividend growth", value: fmtPercent(data.dividend.growthRate), grade: metricGrade(data.dividend.growthRate, { goodThreshold: 0.05, badThreshold: 0 }) },
+        { label: "5Y avg dividend yield", value: fmtPercent(data.dividend.fiveYearAvgYield), grade: metricGrade(data.dividend.fiveYearAvgYield, { goodThreshold: 0.02, badThreshold: 0 }) },
       ],
     },
   ];
@@ -375,7 +375,7 @@ function DividendSubView({ data }: { data: FundamentalMetricsResponse }) {
           <div className="grid grid-cols-1 gap-x-10 sm:grid-cols-2">
             <GradedMetricRow label="Dividend yield" value={fmtPercent(d.yield)} grade={metricGrade(d.yield, { goodThreshold: 0.02, badThreshold: 0 })} />
             <GradedMetricRow label="Payout ratio" value={fmtPercent(d.payoutRatio)} grade={metricGrade(d.payoutRatio, { goodThreshold: 0.6, badThreshold: 0.9, inverse: true })} />
-            <GradedMetricRow label="5Y dividend growth" value={fmtPercent(d.growthRate)} grade={metricGrade(d.growthRate, { goodThreshold: 0.05, badThreshold: 0 })} />
+            <GradedMetricRow label="5Y avg dividend yield" value={fmtPercent(d.fiveYearAvgYield)} grade={metricGrade(d.fiveYearAvgYield, { goodThreshold: 0.02, badThreshold: 0 })} />
           </div>
         </>
       ) : (

@@ -253,7 +253,13 @@ export class WishlistService {
               const prices = historicalData.map(d => d.value);
               const volumes = historicalData.map(d => d.volume);
               const indicators = technicalAnalysisService.calculateIndicators(prices, volumes);
-              // Use the actual calculated score instead of mapping signal
+              // Use the actual calculated score instead of mapping signal.
+              // SCM-03: getInsufficientDataResponse() now returns score: null
+              // (was 0, maximally bearish) for signal === 'INSUFFICIENT_DATA'.
+              // This typeof guard already treats a non-number score as
+              // missing, so technicalScore correctly becomes null here — the
+              // composite's weightedCompositeTotal substitutes a neutral 5
+              // for a null dimension instead of a bearish 0.
               technicalScore = typeof indicators.score === 'number' ? indicators.score : null;
             }
           } else {
