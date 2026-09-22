@@ -25,10 +25,10 @@ export interface BatchArticleInput {
 /**
  * Result of a batch sentiment pass: a map from the input article's `id` to
  * its result, or `null` if the model omitted that id from its response
- * (never defaulted to neutral — plan Task 7/ADR-31). `ok: false` means every
+ * (never defaulted to neutral — plan Task 7/ADR-32). `ok: false` means every
  * model in the GEMINI_MODELS chain failed the request or the response could
  * not be parsed at all — callers must leave every article unanalysed
- * (`sentiment: null`), never write a fabricated neutral (plan Task 9/ADR-31).
+ * (`sentiment: null`), never write a fabricated neutral (plan Task 9/ADR-32).
  */
 export type BatchSentimentResult =
   | { ok: true; results: Map<string, SentimentResult | null> }
@@ -144,7 +144,7 @@ export class SentimentAnalysisService {
 
   /**
    * Analyzes N articles in a single Gemini request, structurally constrained
-   * by responseSchema (plan Task 7, ADR-31). Tries each model in
+   * by responseSchema (plan Task 7, ADR-32). Tries each model in
    * GEMINI_MODELS (plan Task 8) in sequence until one succeeds. Returns
    * `{ ok: false }` only when every model failed or the response could not
    * be parsed at all — callers must leave affected articles `null`

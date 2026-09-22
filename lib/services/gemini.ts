@@ -3,7 +3,7 @@
 // (sentiment.service.ts, app/api/insights/portfolio/route.ts). Change the
 // model chain in exactly one place — see
 // plans/2026-07-20-gemini-model-update.md and
-// plans/2026-07-24-news-sentiment-accuracy.md (Task 8, ADR-32).
+// plans/2026-07-24-news-sentiment-accuracy.md (Task 8, ADR-33).
 //
 // The original single-pinned model (Gemini 1.5 Flash) was retired by Google
 // in 2026 and started returning 404 on generateContent — a single point of

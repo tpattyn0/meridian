@@ -60,8 +60,8 @@ that was supposed to catch it being tautological (NSA-I2).
 - **No overclaiming on TD-01 / ADR-7 / TD-28.** `TECH_DEBT.md:11` states plainly that the key
   "**remains live and publicly readable in git history**", that removing the consumer "does not
   unpublish or revoke it", and marks TD-01 amended-not-closed at severity Low. ADR-7 is marked
-  `Status: superseded by ADR-33` with its text left intact for history — superseded, not edited
-  in place, exactly as the plan required. ADR-33 is `accepted` and repeats the
+  `Status: superseded by ADR-34` with its text left intact for history — superseded, not edited
+  in place, exactly as the plan required. ADR-34 is `accepted` and repeats the
   not-revocable/not-closed caveats. The CI comment block was updated to match. No document
   claims the key is safe.
 - **XXE / entity expansion: not exploitable.** Probed live —
@@ -221,8 +221,8 @@ that an article is about this company, is a constant for the entire RSS source a
 information. The margin protecting the filter is one notch: an off-topic RSS item scores exactly
 `0.3` against `MIN_RELEVANCE = 0.4`, so it is dropped — but any future tweak that lowers
 `MIN_RELEVANCE` to 0.3, or adds any small additional signal, would admit *every* off-topic RSS
-item unconditionally. Given ADR-34 accepts that ~4% of RSS items are about a different company,
-and ADR-30 makes this filter the sole precision guard, the thin margin is worth pinning.
+item unconditionally. Given ADR-35 accepts that ~4% of RSS items are about a different company,
+and ADR-31 makes this filter the sole precision guard, the thin margin is worth pinning.
 
 There is no test covering an off-topic article *carrying the RSS self-tag* — `news-relevance.test.ts:64-73`
 tests the off-topic headlines without a `symbols` array, which is not the shape RSS actually
@@ -280,15 +280,15 @@ symbol sanity check) has not been run in this session and is the natural place t
 
 ## Proposed DECISIONS.md entries
 
-ADR-30 through ADR-34 were added by this branch and already carry `Status: accepted` with real
+ADR-31 through ADR-35 were added by this branch and already carry `Status: accepted` with real
 file:line evidence; ADR-7 is correctly marked superseded. No new ADRs are required from this
 review.
 
 One amendment to propose **only if the owner adopts the shared-helper approach in NSA-I1** (it
-changes ADR-30's and Task 11's stated contract from convention to structure):
+changes ADR-31's and Task 11's stated contract from convention to structure):
 
 ```
-## ADR-35 — The News & sentiment headline score is computed by one shared helper, not three mirrored call sites
+## ADR-36 — The News & sentiment headline score is computed by one shared helper, not three mirrored call sites
 - **Decision:** The weighted-average-sentiment → calibrated map → sample-damping pipeline is
   extracted into a single exported helper in `lib/utils/research-scores.ts` taking the article
   array, and consumed unchanged by `components/news-feed.tsx`, `components/overview.tsx`, and
@@ -337,7 +337,7 @@ shared-helper extraction is structurally sound, and NSA-I2's rewritten test was 
 actually fail — I reproduced three independent mutations in a throwaway git worktree and each one
 broke the suite (detail below). The one new finding is a documentation miss, not a code defect:
 `ARCHITECTURE.md`'s key-files row still describes the pre-fix two-function pipeline and never
-mentions `computeSentimentScore`, while `AGENT.md`, `DECISIONS.md` (ADR-35), and `TECH_DEBT.md`
+mentions `computeSentimentScore`, while `AGENT.md`, `DECISIONS.md` (ADR-36), and `TECH_DEBT.md`
 were all correctly updated.
 
 ## Iteration-1 findings — resolution status
@@ -408,7 +408,7 @@ were all correctly updated.
   (`.github/workflows/verify.yml:134`), `.env`/`.env*.local`/`scratch/` are still gitignored
   (`.gitignore:21-25,59,62`), and `git ls-files` shows only `.env.example` tracked. The local
   secret scan passes (`no leaks found`).
-- **`ADR-35` matches what shipped.** It is `Status: accepted` (correctly upgraded from the
+- **`ADR-36` matches what shipped.** It is `Status: accepted` (correctly upgraded from the
   `proposed` iteration 1 drafted) with real evidence paths, all of which resolve to code that
   exists. Its description of the null-exclusion rule and the removed `0.5` literal matches the
   implementation exactly — no overclaiming.
@@ -487,9 +487,9 @@ the pre-fix design and was not updated by the fix pass. It reads:
 That sentence is now the *iteration-1* architecture. It never mentions `computeSentimentScore`,
 which is the module's new primary export and the actual thing the three call sites consume; it
 describes the three sites as sharing two low-level primitives, which is precisely the
-by-convention arrangement ADR-35 replaced because it failed. A reader consulting
+by-convention arrangement ADR-36 replaced because it failed. A reader consulting
 `ARCHITECTURE.md` to find the sentiment-scoring entry point is pointed at the two functions they
-should now be calling *through* the helper, not directly — the exact mistake ADR-35 and
+should now be calling *through* the helper, not directly — the exact mistake ADR-36 and
 `AGENT.md`'s fragile-surface entry 5 both explicitly warn against ("do not reimplement this inline
 at a fourth call site").
 
@@ -500,7 +500,7 @@ Severity is ISSUE rather than SUGGESTION because this is a documented-decision-v
 contradiction on a surface `AGENT.md` designates as fragile, not a stylistic gap.
 
 **Recommendation:** Update the `lib/utils/research-scores.ts` row in `ARCHITECTURE.md:56` to lead
-with `computeSentimentScore(articles)` as the shared News & sentiment entry point (citing ADR-35),
+with `computeSentimentScore(articles)` as the shared News & sentiment entry point (citing ADR-36),
 state that `news-feed.tsx`, `overview.tsx`, and `wishlist.service.ts` call it directly rather than
 composing the primitives themselves, note the `sentiment === null` exclusion rule, and demote
 `calibratedSentimentToScore`/`dampenForSample`/`MIN_CONFIDENT_SAMPLE` to internals of that helper
@@ -538,7 +538,7 @@ the natural place to settle it.
 
 ## Proposed DECISIONS.md entries (iteration 2)
 
-None. ADR-35 was added by the fix pass, is `Status: accepted`, and its evidence paths all resolve
+None. ADR-36 was added by the fix pass, is `Status: accepted`, and its evidence paths all resolve
 to code that exists at HEAD — it accurately records the decision iteration 1 proposed. No new
 ADRs are required from this iteration; NSA2-I1 is a documentation correction, not a decision.
 
@@ -651,7 +651,7 @@ volunteers the related `Barco`/`Barcola` proper-noun collision unprompted. No ac
 **4. `BOILERPLATE_DEMOTION_FACTOR = 0.5` landing demoted items at exactly `MIN_RELEVANCE` — an
 undocumented accident, not a deliberate design. See NSA3-I1's companion, NSA3-S1.** The arithmetic
 is `(0.5 + 0.3) × 0.5 = 0.40`, exactly `MIN_RELEVANCE`, retained only because comparisons use `>=`.
-Nothing in ADR-36, AGENT.md, or the code comments notes this coincidence, and it is genuinely
+Nothing in ADR-37, AGENT.md, or the code comments notes this coincidence, and it is genuinely
 fragile: the stated design intent is "demoted, **not discarded** — these are technically on-topic",
 yet lowering the factor to `0.49`, raising `MIN_RELEVANCE` to `0.41`, or trimming
 `SYMBOLS_MATCH_SCORE` by `0.01` silently converts every demoted 13F notice from *retained* to
@@ -665,7 +665,7 @@ NSA3-S1 as a doc/comment fix rather than a separate finding, since the test alre
 shows exactly six files: `lib/utils/news-relevance.ts`, `lib/utils/news-relevance.test.ts`,
 `AGENT.md`, `DECISIONS.md`, `TECH_DEBT.md`, `STATUS.md`. `news.service.ts`, `sentiment.service.ts`,
 `gemini.ts`, `research-scores.ts`, `news-feed.tsx`, `overview.tsx`, and `wishlist.service.ts` are
-all untouched, so retrieval volume, the headline-score pipeline (ADR-35's `computeSentimentScore`),
+all untouched, so retrieval volume, the headline-score pipeline (ADR-36's `computeSentimentScore`),
 keyless operation, `.BR` ticker handling, and the refresh latch cannot have moved. Full suite
 372/372 (was 363, +9 new — matches the reported count). The one behavioral shift within the
 scorer's own contract: every article's absolute score drops by one band (an RSS-sourced real story
@@ -763,7 +763,7 @@ header when iteration 3's findings are closed — the same commit, per the Codin
 review-is-the-gate rule.
 
 ### NSA3-S1 — SUGGESTION
-**File:** `lib/utils/news-relevance.ts:172-176`, `:192-193`; `DECISIONS.md` ADR-36 Tradeoffs
+**File:** `lib/utils/news-relevance.ts:172-176`, `:192-193`; `DECISIONS.md` ADR-37 Tradeoffs
 
 **Problem:** Three documentation claims in this fix pass are inaccurate or incomplete against the
 code as written. None changes behavior, but each would mislead the next person to touch this file —
@@ -774,7 +774,7 @@ which AGENT.md now explicitly designates a fragile surface.
    No pattern tests for an actor name at all; pattern 3 in particular is a bare verb+noun+preposition
    match, which is why "SoftBank trims stake in Alphabet" and "S&P 500 index raises its position in
    tech names" are caught (see NSA3-Q1).
-2. **ADR-36's Tradeoffs paragraph describes the post-fix clustering as `0.5`/`0.8`/`1.0`.** For the
+2. **ADR-37's Tradeoffs paragraph describes the post-fix clustering as `0.5`/`0.8`/`1.0`.** For the
    RSS path — the volume source, and the one this whole regression was about — the reachable values
    are `0.40` and `0.80` only, because RSS items are title-only and self-tag `symbols`. `1.0` is
    unreachable without a summary or content match, which no RSS article has.
@@ -785,7 +785,7 @@ which AGENT.md now explicitly designates a fragile surface.
 
 **Recommendation:** Reword the pattern comment to describe what the regexes actually match (holdings
 verb + share/stake noun phrasing, no actor anchor) and note the known false-positive shapes. Correct
-ADR-36's clustering figures to `0.40`/`0.80` for the RSS path, keeping the full lattice as the
+ADR-37's clustering figures to `0.40`/`0.80` for the RSS path, keeping the full lattice as the
 general case. Add one line at `BOILERPLATE_DEMOTION_FACTOR`'s declaration recording that
 `(TITLE + SYMBOLS) × FACTOR` lands exactly on `MIN_RELEVANCE` and that retention depends on the
 `>=` comparison — so the coupling is visible at the point of change.
@@ -844,11 +844,11 @@ settle at merge time.
 
 ## Proposed DECISIONS.md entries (iteration 3)
 
-None. ADR-36 was added by the fix pass, is `Status: accepted`, and its Decision/Evidence sections
+None. ADR-37 was added by the fix pass, is `Status: accepted`, and its Decision/Evidence sections
 accurately describe the code at HEAD (the Tradeoffs paragraph needs the numeric correction in
 NSA3-S1, which is a factual fix to an existing ADR, not a new decision). If the owner chooses
-NSA3-Q1 option (b), the narrowed pattern set is a refinement of ADR-36's mechanism and should be
-recorded as an amendment to ADR-36 rather than a new ADR.
+NSA3-Q1 option (b), the narrowed pattern set is a refinement of ADR-37's mechanism and should be
+recorded as an amendment to ADR-37 rather than a new ADR.
 
 ---
 
@@ -1060,10 +1060,10 @@ are unchanged in this range. Correctly left as the owner's call at merge time. N
 
 ## Proposed DECISIONS.md entries (iteration 4)
 
-None. ADR-36's amendment already records the actor-anchor tightening accurately, including the
+None. ADR-37's amendment already records the actor-anchor tightening accurately, including the
 recall-for-precision tradeoff — and it even anticipates the direction-1 miss class ("a genuinely
 institutional actor whose name doesn't happen to carry a recognized suffix is no longer demoted").
 NSA4-I1 is a refinement of that same mechanism, not a new decision: if fixed as recommended, extend
-ADR-36's amendment with the requested-company exclusion rather than opening a new ADR. Note that
-ADR-36's Tradeoffs paragraph does *not* currently mention the direction-2 false positive; if the
+ADR-37's amendment with the requested-company exclusion rather than opening a new ADR. Note that
+ADR-37's Tradeoffs paragraph does *not* currently mention the direction-2 false positive; if the
 owner instead chooses to accept it, that paragraph needs updating to say so.

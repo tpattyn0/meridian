@@ -2,7 +2,7 @@
  * Token-based, word-boundary relevance scoring for news articles against a
  * stock symbol + company name — extracted from `news.service.ts`'s
  * `calculateRelevance` (plans/2026-07-24-news-sentiment-accuracy.md, Task 5,
- * ADR-30). Pure, exported, unit-testable: no DOM, no Prisma, no network.
+ * ADR-31). Pure, exported, unit-testable: no DOM, no Prisma, no network.
  *
  * Replaces literal-substring matching (`companyName` matched as an exact
  * substring, e.g. "Alphabet Inc." never matching "Alphabet slides…") with
@@ -26,7 +26,7 @@
 export const CORP_SUFFIX =
   /\b(s\.?a\.?|société anonyme|societe anonyme|n\.?v\.?|inc\.?|corp\.?|corporation|holdings?|group|company|co\.?|plc|ag|ltd\.?|limited|se|spa|ab|oyj|asa)\b/gi;
 
-/** Single relevance threshold shared by the ingest filter and all DB reads (ADR-30). */
+/** Single relevance threshold shared by the ingest filter and all DB reads (ADR-31). */
 export const MIN_RELEVANCE = 0.4;
 
 /**

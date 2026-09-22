@@ -5,7 +5,7 @@ Date: 2026-07-24
 > NewsAPI and tuned it. NewsAPI is now **removed entirely** and replaced by
 > **Google News RSS**. The R1-R6 / S1-S4 defect analysis below is
 > source-independent and survives unchanged; the source strategy, Task 6, Task 7,
-> and ADR-31 are rewritten, and a new Task 0 handles the NewsAPI removal and its
+> and ADR-32 are rewritten, and a new Task 0 handles the NewsAPI removal and its
 > TD-01 / ADR-7 / TD-28 knock-on effects.
 
 ## Problem
@@ -284,7 +284,7 @@ TD-DTL-TONE MoM delta.
    overclaiming (see `## The TD-01 / ADR-7 / TD-28 knock-on` below for the exact
    wording and the gitleaks trap — **read that section before touching
    `.gitleaks.toml` or `.gitleaks-local/.gitleaksignore`**). Update
-   `ARCHITECTURE.md` lines 8, 19, 45. Add the ADR-33 amendment to ADR-7. —
+   `ARCHITECTURE.md` lines 8, 19, 45. Add the ADR-34 amendment to ADR-7. —
    Acceptance: `git grep -n "NEWS_API_KEY\|newsapi\|fetchNewsAPI"` returns hits
    **only** in `.gitleaks.toml`, `.gitleaks-local/.gitleaksignore`,
    `.github/workflows/verify.yml` comments, `TECH_DEBT.md`, `DECISIONS.md`, and
@@ -468,7 +468,7 @@ TD-DTL-TONE MoM delta.
    Google retired it**, so copying that list would reintroduce a known-dead
    endpoint as a fallback. Lead with the currently-verified `gemini-2.5-flash` and
    add one or two live alternatives, each confirmed to respond before being
-   committed. This directly addresses the single-point-of-failure tradeoff ADR-31
+   committed. This directly addresses the single-point-of-failure tradeoff ADR-32
    previously rated Medium confidence on. —
    Acceptance: a unit test asserts that when the first model's `generateContent`
    rejects, the second is tried and its result returned; that all models failing
@@ -589,12 +589,12 @@ annoyance against an unused free-tier account, not a user-visible outage.
   key); optionally scrub history / make the repo private." Update the `Used by`
   clause — it currently names `lib/services/news.service.ts`, which will no longer
   reference it.
-- **ADR-7 → superseded by ADR-33** (below), not edited in place. ADR-7's status is
+- **ADR-7 → superseded by ADR-34** (below), not edited in place. ADR-7's status is
   `accepted-but-flagged` with the validity **conditional on non-deployment** — and
   that condition is exactly what changes. Its own Confidence note flags the risk:
   "a decision conditional on 'we won't deploy' silently expires the moment someone
-  deploys." ADR-33 removes the dependence on that condition. Mark ADR-7
-  `superseded by ADR-33` and leave its text intact for history.
+  deploys." ADR-34 removes the dependence on that condition. Mark ADR-7
+  `superseded by ADR-34` and leave its text intact for history.
 - **TD-28 → amended, and the CI gate can be tightened only partially.** TD-28's
   recommended fix says to drop `continue-on-error` from the `secret-history` job
   "when TD-01 is fully resolved." TD-01 is **not** fully resolved by this plan, so
@@ -741,7 +741,7 @@ fingerprint) — are decided above with reasoning; remaining uncertainty is in
 ## Proposed DECISIONS.md entries
 
 ```
-## ADR-30 — Relevance scoring is token-based with word-boundary matching, on one shared threshold
+## ADR-31 — Relevance scoring is token-based with word-boundary matching, on one shared threshold
 - **Decision:** Replace `news.service.ts`'s literal-substring relevance scoring with a
   pure, exported helper (`lib/utils/news-relevance.ts`) that derives match tokens by
   stripping corporate suffixes from the company name, matches on word boundaries, and
@@ -753,13 +753,13 @@ fingerprint) — are decided above with reasoning; remaining uncertainty is in
   some market-context articles that only mention the company in passing; accepted, because
   the measured alternative discards the articles that explain a -7% day. The dead uppercase
   penalty is removed rather than repaired, so no compensating precision mechanism remains —
-  precision now rests entirely on the token/threshold pair. That bet is larger under ADR-34's
+  precision now rests entirely on the token/threshold pair. That bet is larger under ADR-35's
   RSS source, which measured 4 off-topic items per 100, than it was under the prior source
   set; this filter is now the only guard against scoring another company's news.
 - **Status:** proposed
 - **Confidence:** High
 
-## ADR-31 — Sentiment analysis is one batched Gemini call constrained by responseSchema; failures persist as null, never neutral
+## ADR-32 — Sentiment analysis is one batched Gemini call constrained by responseSchema; failures persist as null, never neutral
 - **Decision:** Replace the per-article Gemini fan-out (capped at 3) with a single
   `analyzeSentimentBatch` request whose `generationConfig` sets
   `responseMimeType: 'application/json'`, `temperature: 0.1`, and an explicit
@@ -775,16 +775,16 @@ fingerprint) — are decided above with reasoning; remaining uncertainty is in
 - **Tradeoffs:** `responseSchema` makes the response shape an API-enforced contract rather
   than a prompt request, which removes the hand-rolled index-echo and reordering defenses an
   earlier draft of this decision required. It costs a hard dependency on the schema feature
-  being supported by every model in the ADR-32 chain — verified per model before commit. One
+  being supported by every model in the ADR-33 chain — verified per model before commit. One
   batch remains a single point of failure for N articles where the fan-out degraded
-  per-article; mitigated by ADR-32's model chain and by leaving unanalysed articles `null`
+  per-article; mitigated by ADR-33's model chain and by leaving unanalysed articles `null`
   (already excluded from the aggregate and rendered "PENDING"), which is strictly more honest
   than the fabricated neutral it replaces.
 - **Status:** proposed
 - **Confidence:** High — raised from the earlier draft's Medium: the schema removes the
-  parse-shape risk, and ADR-32 removes the single-model risk that drove the original rating.
+  parse-shape risk, and ADR-33 removes the single-model risk that drove the original rating.
 
-## ADR-32 — Gemini calls try an ordered model chain instead of one pinned model
+## ADR-33 — Gemini calls try an ordered model chain instead of one pinned model
 - **Decision:** `lib/services/gemini.ts` exports an ordered `GEMINI_MODELS` chain, tried in
   sequence until one succeeds. `GEMINI_MODEL` remains exported as the chain's first entry so
   existing consumers and tests are unaffected. The chain leads with the currently
@@ -802,7 +802,7 @@ fingerprint) — are decided above with reasoning; remaining uncertainty is in
 - **Status:** proposed
 - **Confidence:** High
 
-## ADR-33 — NewsAPI is removed; ADR-7's non-deployment condition no longer gates production
+## ADR-34 — NewsAPI is removed; ADR-7's non-deployment condition no longer gates production
 - **Decision:** Supersedes ADR-7. `NEWS_API_KEY` and all NewsAPI code are removed from the
   application. The leaked key remains live and publicly readable in git history (commits
   `2a6c4c1a`, `3855042e`) and is still not revocable — removing the consumer does **not**
@@ -825,7 +825,7 @@ fingerprint) — are decided above with reasoning; remaining uncertainty is in
 - **Status:** proposed
 - **Confidence:** High
 
-## ADR-34 — Google News RSS replaces NewsAPI as the volume source, parsed with cheerio
+## ADR-35 — Google News RSS replaces NewsAPI as the volume source, parsed with cheerio
 - **Decision:** The news source set becomes **Yahoo Finance `search()` (precision) + Google
   News RSS (volume)**. NewsAPI is removed rather than demoted. RSS is fetched keylessly via
   native `fetch` + `AbortController` and parsed with **`cheerio` in `xmlMode: true`** — already
@@ -847,7 +847,7 @@ fingerprint) — are decided above with reasoning; remaining uncertainty is in
   added); `lib/services/__fixtures__/google-news-googl.xml` (captured live response backing
   the parser tests) — not-implemented until this plan lands.
 - **Tradeoffs:** Three, all accepted. (1) **Lower precision** — 4 of 100 probe items were
-  about a different company, so ADR-30's relevance filter becomes load-bearing rather than
+  about a different company, so ADR-31's relevance filter becomes load-bearing rather than
   a safety net. (2) **Dirty data** — the probe reproduced a literal `META_TITLE_QUOTE`
   placeholder title, requiring a junk-title guard; assume more such artifacts exist. (3)
   **Unversioned, undocumented, unsupported feed** — Google can change or withdraw it without

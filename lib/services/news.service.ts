@@ -105,7 +105,7 @@ export class NewsAggregationService {
         allNews = this.deduplicateNews(allNews);
 
         // Score relevance with the shared token-based helper (plan Task 5,
-        // ADR-30) — replaces literal-substring matching.
+        // ADR-31) — replaces literal-substring matching.
         for (const article of allNews) {
           article.relevanceScore = scoreRelevance(article, symbol, companyName);
         }
@@ -175,7 +175,7 @@ export class NewsAggregationService {
   }
 
   /**
-   * Google News RSS (plan Task 6, ADR-34) — keyless, volume source. Ported
+   * Google News RSS (plan Task 6, ADR-35) — keyless, volume source. Ported
    * from Compass/src/lib/news/rss.ts:85-173 with Meridian-specific changes:
    * source/title read from the <source> element (not guessed from the
    * title), a junk-title guard, and no `summary`/`content` (the RSS
@@ -433,7 +433,7 @@ export class NewsAggregationService {
               const result = batchResult.results.get(article.id);
               // An article whose id is absent from the response (or the
               // whole batch failed) stays null (unanalyzed) — never
-              // defaulted to neutral (plan Task 7/9, ADR-31).
+              // defaulted to neutral (plan Task 7/9, ADR-32).
               if (!result) return;
               try {
                 await prisma.newsArticle.update({
