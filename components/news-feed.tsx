@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
 import { AlertCircle } from "lucide-react";
 import { HeadlineScoreCard } from "@/components/research/headline-score-card";
-import { round1, sentimentToScore } from "@/lib/utils/research-scores";
+import { MIN_CONFIDENT_SAMPLE, computeSentimentScore } from "@/lib/utils/research-scores";
 import { cn } from "@/lib/utils";
 
 interface NewsArticle {
@@ -49,47 +49,45 @@ export function NewsFeed({ symbol, companyName, articles: propArticles }: NewsFe
     refetchInterval: 5 * 60 * 1000,
   });
 
-  const allNews = propArticles || fetchedArticles || [];
-  const news = allNews.filter((a) => (a.relevanceScore ?? 1) >= 0.5);
+  // No client-side relevance re-filter here (removed NSA-I1): the server
+  // already filters every article this component can see to
+  // `relevanceScore >= MIN_RELEVANCE` (`news.service.ts`'s
+  // `getAnalyzedNewsForSymbol`, the sole source for both the `/api/news/[symbol]`
+  // route this component queries and `propArticles` callers), so a second,
+  // differently-tuned client-side threshold can only ever disagree with the
+  // server, never usefully narrow it further. Memoized (not just `||`-chained)
+  // so the `[]` fallback is a stable reference across renders, matching what
+  // the `useMemo` below expects of its `[news]` dependency.
+  const news = useMemo(() => propArticles || fetchedArticles || [], [propArticles, fetchedArticles]);
 
-  const { score, positivePct, neutralPct, negativePct } = useMemo(() => {
-    const analyzed = news.filter((a) => a.sentiment !== null && a.sentiment !== undefined);
-    if (analyzed.length === 0) {
-      return { score: 5, positivePct: 0, neutralPct: 0, negativePct: 0 };
-    }
-
-    let weighted = 0;
-    let totalW = 0;
-    let positive = 0;
-    let neutral = 0;
-    let negative = 0;
-
-    for (const a of analyzed) {
-      const s = a.sentiment ?? 0;
-      let w = 1;
-      if (a.impact === "high") w = 3;
-      else if (a.impact === "medium") w = 2;
-      const rel = a.relevanceScore ?? 0.5;
-      const weight = w * rel;
-      weighted += s * weight;
-      totalW += weight;
-
-      if (s > 0.2) positive++;
-      else if (s < -0.2) negative++;
-      else neutral++;
-    }
-
-    const avg = totalW > 0 ? weighted / totalW : 0;
+  // Shared News & sentiment score derivation (plans/2026-07-24-news-sentiment-accuracy.md,
+  // Task 11; review NSA-I1/NSA-I2) — identical function call at all three
+  // call sites (this component, overview.tsx, wishlist.service.ts) so they
+  // cannot silently diverge. See `computeSentimentScore`'s docstring for the
+  // null-sentiment exclusion rule.
+  const { score, positivePct, neutralPct, negativePct, analysedCount } = useMemo(() => {
+    const result = computeSentimentScore(news);
+    const total = result.positiveCount + result.neutralCount + result.negativeCount;
     return {
-      score: round1(sentimentToScore(avg)),
-      positivePct: Math.round((positive / analyzed.length) * 100),
-      neutralPct: Math.round((neutral / analyzed.length) * 100),
-      negativePct: Math.round((negative / analyzed.length) * 100),
+      score: result.score,
+      positivePct: total > 0 ? Math.round((result.positiveCount / total) * 100) : 0,
+      neutralPct: total > 0 ? Math.round((result.neutralCount / total) * 100) : 0,
+      negativePct: total > 0 ? Math.round((result.negativeCount / total) * 100) : 0,
+      analysedCount: result.analysedCount,
     };
   }, [news]);
 
+  // Thin-sample honesty (plans/2026-07-24-news-sentiment-accuracy.md, Task 12,
+  // DESIGN.md "Thin-sample honesty"). The WARMING/STEADY/COOLING word is
+  // derived from the already-damped `score` — no separate thin-sample
+  // vocabulary, so a damped thin-sample score in the 4-7 band already reads
+  // "Steady," which is the honest word for it. `trendBanded` is forced false
+  // on a thin sample regardless of what the damped score's band would
+  // otherwise imply — the kicker's bold `--up` color is reserved for "this is
+  // a well-founded reading," which a thin sample is not, by definition.
+  const isThinSample = analysedCount > 0 && analysedCount < MIN_CONFIDENT_SAMPLE;
   const trendKicker = score >= 7 ? "Warming" : score >= 4 ? "Steady" : "Cooling";
-  const trendBanded = score >= 7;
+  const trendBanded = score >= 7 && !isThinSample;
 
   if (isLoading && !propArticles) {
     return (
@@ -103,14 +101,16 @@ export function NewsFeed({ symbol, companyName, articles: propArticles }: NewsFe
     <div className="space-y-5">
       <HeadlineScoreCard
         kicker="News & sentiment"
-        metaKicker={`${news.length} articles analysed · last 30 days`}
+        metaKicker={`${analysedCount} articles analysed · last 30 days`}
         score={score}
         verdictKicker={trendKicker}
         verdictKickerBanded={trendBanded}
         summary={
-          news.length === 0
+          analysedCount === 0
             ? `No recent news coverage found for ${symbol}.`
-            : `Sentiment reflects ${news.length} analysed articles, weighted by relevance and market impact.`
+            : isThinSample
+              ? `Sentiment reflects only ${analysedCount} analysed article${analysedCount === 1 ? "" : "s"} — too few for a confident reading. Score shown is weighted toward neutral.`
+              : `Sentiment reflects ${analysedCount} analysed articles, weighted by relevance and market impact.`
         }
       >
         <div className="grid grid-cols-3 pt-5">

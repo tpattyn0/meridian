@@ -14,7 +14,21 @@ vi.mock("@google/generative-ai", () => ({
   GoogleGenerativeAI: GoogleGenerativeAIMock,
 }));
 
-import { getGeminiApiKey, createGeminiClient } from "./gemini";
+import { getGeminiApiKey, createGeminiClient, GEMINI_MODEL, GEMINI_MODELS } from "./gemini";
+
+describe("GEMINI_MODELS — model fallback chain (plans/2026-07-24-news-sentiment-accuracy.md Task 8)", () => {
+  it("GEMINI_MODEL equals the chain's first entry", () => {
+    expect(GEMINI_MODEL).toBe(GEMINI_MODELS[0]);
+  });
+
+  it("does not include the retired gemini-1.5-flash (Compass's list includes it; deliberately not copied)", () => {
+    expect(GEMINI_MODELS).not.toContain("gemini-1.5-flash");
+  });
+
+  it("has more than one entry — a real fallback chain, not a single pinned model wrapped in an array", () => {
+    expect(GEMINI_MODELS.length).toBeGreaterThan(1);
+  });
+});
 
 describe("getGeminiApiKey", () => {
   const originalKey = process.env.GEMINI_API_KEY;

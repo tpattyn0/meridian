@@ -434,6 +434,22 @@ Row content:
   (NEGATIVE). No pill/border chrome — text color only, unlike the outlined badges
   elsewhere in the system.
 
+**PENDING tag — confirmed, no change (`plans/2026-07-24-news-sentiment-accuracy.md`
+Task 12).** A fourth tag state, already implemented at `news-feed.tsx:31` and
+already spec-compliant: same slot, same treatment as NEUTRAL — sans 10.5px/600,
+0.14em, `--mut`, no pill/border chrome. Prior to that plan this state was
+theoretical (a failed analysis silently persisted as a fabricated neutral `0`,
+so "pending" never actually rendered); the plan makes `sentiment: null` a
+real, reachable outcome (analysis failed or has not run yet), and PENDING is
+what a `null`-sentiment row renders via the existing `sentimentTag()` null
+branch. **Do not give PENDING its own color.** `--mut` already reads as "no
+verdict" elsewhere in this exact list (NEUTRAL) and on the `ScoreFigure`
+(null/unavailable band) — a fourth accent color for "pending" would break the
+three-color chromatic-accent rule for a state that is, semantically, the same
+"nothing to report yet" as NEUTRAL and null-score. The two remain
+distinguishable by their copy alone (PENDING vs NEUTRAL), exactly as intended —
+this list has never disambiguated its tags by color count, only by word.
+
 ### Outlined type badge (transactions)
 Inline pill, sans 10px/600 uppercase, 0.14em letter-spacing, `border-radius:10px`,
 `padding:2px 10px`. Two variants by transaction type:
@@ -1603,11 +1619,12 @@ figure).
    pattern, off-design — no serif values, no Meridian tokens, plain shadcn `Badge`
    instead of the Outlined type badge) is retired once no importer remains.
 7. **News & sentiment** — Headline score card: 84px sentiment score + trend kicker
-   (banded, e.g. "Warming" in `--up`) + italic summary on the left; 3-col tone band
-   on the right (Positive/Neutral/Negative %, each with a colored MoM-delta caption
-   line — omitted when history is too thin to compute, data gap), **no top rule** —
-   see Components → "Headline score card" → right column note. Below: the
-   Editorial coverage list ("Latest coverage").
+   (banded, e.g. "Warming" in `--up`, on a healthy sample — see "Thin-sample
+   honesty" below for the reduced-confidence case) + italic summary on the left;
+   3-col tone band on the right (Positive/Neutral/Negative %, each with a colored
+   MoM-delta caption line — omitted when history is too thin to compute, data
+   gap), **no top rule** — see Components → "Headline score card" → right column
+   note. Below: the Editorial coverage list ("Latest coverage").
 
    **Portfolio-route lead-in (`plans/2026-07-19-research-tab-fixes.md` item 9).** On
    `/portfolio/[ticker]` only, the top `SentimentScore` card that used to sit above
@@ -1627,6 +1644,121 @@ figure).
    `space-y-5` rhythm and the editorial top rule are unaffected by removing the
    `SentimentScore` card — a card being deleted from a `space-y-5` stack does not
    require any spacing adjustment to the cards that remain.
+
+   **Thin-sample honesty (`plans/2026-07-24-news-sentiment-accuracy.md`, Task 12).**
+   The pipeline change behind this: the meta kicker and caption move from counting
+   *retrieved* articles (`news.length`, i.e. everything that passed the relevance
+   filter) to counting *analysed* articles (those with a non-null `sentiment` —
+   the set the score is actually computed from), and the score itself is now
+   continuously damped toward the 5.0 neutral midpoint below a
+   `MIN_CONFIDENT_SAMPLE = 5` analysed-article threshold (Task 11, in
+   `lib/utils/research-scores.ts`). This changes what the card must say, in three
+   states, using **only existing `HeadlineScoreCard` slots and existing tokens —
+   no new chrome, no new color, no badge:**
+
+   - **Healthy sample (analysed count ≥ `MIN_CONFIDENT_SAMPLE`).** Card renders
+     exactly as today, with corrected copy (below) and the analysed count feeding
+     both slots. This is the overwhelming majority of real symbols per the plan's
+     measured 100-item RSS volume — the thin-sample path is the exception state,
+     not the default one, and must not add weight to the common case.
+   - **Thin sample (`0 < analysed < MIN_CONFIDENT_SAMPLE`).** No new visual
+     element — the existing pieces already carry the signal once fed the right
+     inputs:
+     - **`ScoreFigure`** — unchanged component, unchanged thresholds. Feed it the
+       *damped* score (Task 11's output), not the raw sentiment average. Because
+       damping pulls the number toward 5.0, a thin sample naturally lands in or
+       near the existing `--amber` (4–7) band rather than `--up`'s ≥7 band — the
+       figure is *quieter by construction*, through the same band-coloring rule
+       every other score in this system already uses (Components → "Score
+       figure" thresholds). This is the load-bearing visual cue: a confident 9.6
+       in `--up` green versus a damped ~6 in `--amber` is a materially different
+       signal, achieved with zero new markup.
+     - **Verdict/trend kicker** — still the existing unbadged kicker line slot
+       (`verdictKicker` + `verdictKickerBanded`, `HeadlineScoreCard` left column,
+       item 2). Two changes, both copy/logic, no new prop or color:
+       1. The WARMING/STEADY/COOLING word is derived from the *damped* score, same
+          as today's `score >= 7 ? "Warming" : score >= 4 ? "Steady" : "Cooling"` —
+          no separate thin-sample vocabulary is introduced. A damped thin-sample
+          score sitting in the 4–7 band already reads "Steady," which is honest:
+          "warming" is a conviction word this system should not print over 2
+          articles regardless of their raw average.
+       2. **`verdictKickerBanded` is forced `false` on a thin sample, regardless of
+          what the damped score's band would otherwise imply.** Today
+          `verdictKickerBanded = score >= 7` colors the kicker `--up`/weight 600 to
+          match a strong figure; on a thin sample this must stay the default
+          `--mut`/weight 400 treatment even in the rare case a damped score still
+          clears 7 (a small sample of unanimously extreme articles can still land
+          high after damping). The kicker word and the score figure's own band
+          color already carry the verdict; the kicker's *bold color* is reserved
+          for "this is a well-founded reading," which a thin sample is not, by
+          definition — this is a one-line conditional in existing code, not a new
+          visual state.
+     - **Summary paragraph** — same italic-serif summary slot every tab already
+       populates; carries the thin-sample caption (see Caption copy below). No
+       change to the slot's type treatment (14.5px italic `--mut`).
+     - **Meta kicker** — same slot, analysed-count copy (see Meta kicker below).
+   - **Zero analysed (`analysed === 0`)** — unchanged from the existing
+     zero-coverage state (`ScoreFigure`'s null/unavailable → `--mut` band, already
+     implemented and already correct per this plan's brief); this state does not
+     change under this task. Note the trigger condition is now "zero *analysed*"
+     rather than "zero retrieved" — a symbol can have retrieved articles that are
+     all still `null` (pending) and must render this same no-verdict state, not a
+     false score of 5.
+
+   **Caption copy (summary paragraph slot), three states:**
+   - **Zero analysed** — unchanged wording, already accurate: *"No recent news
+     coverage found for {symbol}."*
+   - **Thin sample** — *"Sentiment reflects only {n} analysed article{s} — too few
+     for a confident reading. Score shown is weighted toward neutral."* Two fixes
+     baked into this wording versus the old copy: it names the *analysed* count
+     (not retrieved), and it drops the false "weighted by relevance and market
+     impact" claim as the *reason to trust* the number — that weighting still runs
+     internally (unchanged aggregate math), but on a thin sample it is not the
+     operative fact; the sample size is. Do not additionally claim a specific
+     damping mechanism ("shrunk toward 5.0") in user-facing copy — "weighted
+     toward neutral" says the same thing in the plain, declarative register Tone
+     of voice requires (Tone of voice → "Precision over enthusiasm"), without
+     exposing an implementation constant.
+   - **Healthy sample** — *"Sentiment reflects {n} analysed articles, weighted by
+     relevance and market impact."* Same structure as today's copy, corrected to
+     read the analysed count instead of `news.length`. The "weighted by relevance
+     and market impact" clause is kept here — unlike the thin-sample state, a
+     healthy sample's score genuinely is a relevance/impact-weighted aggregate
+     (`news-feed.tsx`'s existing weighting math), so the claim is accurate once
+     the count feeding it is accurate.
+
+   **Meta kicker (`metaKicker` slot), analysed-count copy:**
+   - Current: `"{news.length} articles analysed · last 30 days"` — reads off the
+     retrieved/filtered count, not the analysed one, and is therefore currently
+     capable of claiming more articles than the score is built from.
+   - **New:** `"{analysedCount} articles analysed · last 30 days"` where
+     `analysedCount` is the same count driving the score (non-null-sentiment
+     articles). The "· last 30 days" clause is unchanged copy — Task 3
+     reconciles the three retrieval windows to a real, enforced 30 days, so this
+     half of the kicker (previously aspirational per the plan's R5 finding)
+     becomes accurate as a side effect, with no copy change needed.
+   - **When retrieved count exceeds analysed count** (i.e. some articles are
+     still pending/unanalysed — expected under the new batch-cap flow, Task 7),
+     the meta kicker states the analysed count only; it does not additionally
+     surface the retrieved total in this slot. Reason: the meta kicker's job is
+     to say what the *score* is built from, one number, not to reconcile two
+     counts — a reader who wants the fuller picture already sees every retrieved
+     article (analysed or PENDING) in the "Latest coverage" list below, where the
+     PENDING tag (see Editorial coverage list) already discloses which rows are
+     not yet counted. Do not add a second parenthetical count to the kicker
+     (e.g. "12 of 18 articles analysed") — that overloads one muted 10.5px line
+     with two numbers and duplicates information the coverage list already
+     carries more legibly, one row at a time.
+
+   **What is explicitly not changed:** the 3-col tone band (Positive/Neutral/
+   Negative %) on the right, the "no top rule" treatment, the Editorial coverage
+   list below it, and the `HeadlineScoreCard` shell itself (padding, border,
+   header row, grid). This task is a data-source and copy correction inside slots
+   that already exist — see Components → "Headline score card" and Components →
+   "Score figure" for the unchanged mechanics being reused, and the `## Design
+   tokens` note above the Components section: a spec that needed a token or
+   color not already named here would be a spec error, and none is needed for
+   this task.
 
 **Explicitly out of scope for this pass:** `app/page.tsx` (marketing landing page,
 not behind auth) — unchanged, stock-shadcn look retained.

@@ -2,6 +2,7 @@
 
 | Review | Date | Status |
 |--------|------|--------|
+| 2026-07-24-news-sentiment-accuracy.md | 2026-07-24 | IMPLEMENTED — 2026-07-24 (4 iterations; iter-1 NSA-I1 three-call-site score desync + NSA-I2 tautological cross-site test, both fixed via shared `computeSentimentScore` (ADR-36); iter-2 NSA2-I1 ARCHITECTURE.md drift fixed; iter-3 found a post-iter-2 retrieval regression (relevance-score saturation, ADR-37) — the iter-2 IMPLEMENTED stamp was premature and has been removed; NSA3-I1 (saturation fix unpinned by its own tests) + NSA3-I2 (this index/plans-INDEX premature state) + NSA3-S1 (doc/comment accuracy + MIN_RELEVANCE coupling) + NSA3-Q1 (boilerplate false positives, owner decided: tighten patterns) all fixed 2026-07-24; NSA-Q1 analyse-cap tuning still open for owner; verify 377/377) |
 | 2026-07-26-scoring-methodology-phase1-correctness.md | 2026-07-26 | IMPLEMENTED — 2026-07-26 (0 BLOCKERs; SCM-P1-I1 ISSUE + S1/S2 SUGGESTIONs fixed and re-verified in fixpass; PR #38) |
 | 2026-07-26-scoring-methodology-phase1-fixpass.md | 2026-07-26 | IMPLEMENTED — 2026-07-26 (0 BLOCKERs/ISSUEs/SUGGESTIONs; SCM-P1-I1/S1/S2 fixes verified correct, no new findings; 329/329 tests) |
 | 2026-07-23-lib-cleanup-batch.md | 2026-07-23 | IMPLEMENTED |
@@ -36,3 +37,4 @@
 | 2026-07-21-scoring-style-descriptions-retune.md | 2026-07-21 | IMPLEMENTED — 2026-07-21 (0 BLOCKERs; signal-diagnostic retune (zeros allowed, IV=0 for growth) + visible label+description picker + 9 rewritten blurbs; RTN-I1 doc drift resolved iter 2; weights sum-100 & match ADR-24 tables, zeros clean, Balanced derived; 254/254) |
 | 2026-07-23-td08-td15-cleanup.md | 2026-07-23 | IMPLEMENTED |
 | 2026-07-23-td33-hover-marker.md | 2026-07-23 | IMPLEMENTED — 2026-07-23 (0 BLOCKERs/ISSUEs; TD33-Q1 owner-accepted option A → flat-series divergence logged as TD-40; TD33-S1/S2 doc fixes applied; math re-derived over 8,000 cases, mutation-verified) |
+| 2026-07-24-news-sentiment-accuracy.md | 2026-07-24 | Iter 2 reviewed — 0 BLOCKERs; iter-1 NSA-I1/I2/S1/S2/S3 all resolved (shared `computeSentimentScore` helper, ADR-36; cross-site test mutation-verified 3 ways), 1 new ISSUE (NSA2-I1 ARCHITECTURE.md drift), NSA-Q1 cap tuning still awaiting owner; 363/363 |
