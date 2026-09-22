@@ -2,6 +2,8 @@
 
 | Review | Date | Status |
 |--------|------|--------|
+| 2026-07-26-scoring-methodology-phase1-correctness.md | 2026-07-26 | IMPLEMENTED — 2026-07-26 (0 BLOCKERs; SCM-P1-I1 ISSUE + S1/S2 SUGGESTIONs fixed and re-verified in fixpass; PR #38) |
+| 2026-07-26-scoring-methodology-phase1-fixpass.md | 2026-07-26 | IMPLEMENTED — 2026-07-26 (0 BLOCKERs/ISSUEs/SUGGESTIONs; SCM-P1-I1/S1/S2 fixes verified correct, no new findings; 329/329 tests) |
 | 2026-07-23-lib-cleanup-batch.md | 2026-07-23 | IMPLEMENTED |
 | 2026-07-22-morning-note-active-positions-only.md | 2026-07-22 | IMPLEMENTED — 2026-07-22 (0 BLOCKERs/ISSUEs/QUESTIONs; 1 optional SUGGESTION MRN-S1; quantity>0 filter mirrors portfolio route, regression test genuinely fails without filter, empty-portfolio branch correct, docs accurate; verify 257/257) |
 | 2026-07-21-scoring-picker-chips.md | 2026-07-21 | IMPLEMENTED — 2026-07-21 (0 BLOCKERs; inline name-chip picker + accessible Radix hover/focus tooltip, ADR-26; a11y contract verified (no title attr, asChild wraps button, aria-describedby/Escape native, section-local TooltipProvider, providers.tsx untouched); disclosure/ChevronDown removed clean; populate-only no-active-state + scoring/API/gate untouched; skeleton parity; popover tokens both themes; PCH-I1 plan-INDEX advanced, PCH-S1 optional; 254/254) |

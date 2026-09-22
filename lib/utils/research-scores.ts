@@ -49,3 +49,27 @@ export function verdictLabel(score: number, context: "portfolio" | "wishlist"): 
   if (score >= 5.0) return "WATCH";
   return "AVOID";
 }
+
+/**
+ * Analyst-ratings verdict-stamp label for a 0-10 analyst score, sharing the
+ * exact boundaries `AnalystRatingsService.getScoreInterpretation`
+ * (`lib/services/analyst-ratings.service.ts`) uses — the SB=9/B=7/H=4/
+ * S=1.5/SS=0 recentered mapping (SCM-11). Extracted here (SCM-P1-I1) so
+ * `components/analyst-ratings.tsx`'s headline VerdictStamp cannot drift
+ * from the service's own interpretation string again — the component
+ * previously computed this inline with stale pre-recenter thresholds
+ * (`>= 7 STRONG BUY : >= 5.5 BUY : >= 4.5 HOLD : >= 3 SELL`), silently
+ * disagreeing with `getScoreInterpretation` for the majority of
+ * post-recenter scores. Lives in `lib/utils` rather than the service file
+ * because the service imports `prisma`/`@prisma/client`, which must not be
+ * pulled into `analyst-ratings.tsx`'s `"use client"` bundle. If the
+ * recenter mapping or `getScoreInterpretation`'s thresholds ever change,
+ * update both here and there.
+ */
+export function analystVerdictLabel(score: number): string {
+  if (score >= 6) return "STRONG BUY";
+  if (score >= 4.5) return "BUY";
+  if (score >= 3) return "HOLD";
+  if (score >= 1.5) return "SELL";
+  return "STRONG SELL";
+}
