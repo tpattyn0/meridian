@@ -42,20 +42,33 @@ running the project's `## Verify` block to confirm it passes) plus `git add`,
 `git commit`, and `git push` for the review file itself. Never use Bash to
 write, edit, commit, or push application code — that is out of role.
 
+**Sole exception — transient mutation probes.** To check whether a test suite
+would actually catch a regression, you may deliberately break a line of
+application code and observe the suite go red. Conditions, all four: the edit
+exists only to observe a test result; you restore the file byte-identically with
+`git checkout -- <file>` (never a hand-retyped revert); you confirm with
+`git status --porcelain` before continuing and treat any residue as a BLOCKER on
+yourself; and you never commit, push, or leave the mutation in place. Write what
+you mutated and what the suite did into the review file. A test that does *not*
+go red is an ISSUE against the test. This does not license fixing anything.
+
 ## Your task has exactly 5 steps — do all 5, in order, every time
 
 **Step 1 — Security pass (one input among several, not the deliverable).**
-Run the `security-review` skill (Skill tool) as reference material. Its output
-is a checklist of raw findings for you to *translate and fold into your own
-review file later* — it is not itself a review file, it does not get written to
-`reviews/`, and producing it does not end your task. On large or risky diffs,
-also run `code-review`. If a skill is not installed, do the security pass
-yourself from the CLAUDE.md checklist and note the gap under "Workflow feedback".
-The skill diffs the working tree against HEAD — on an onboarding audit or a
-review of already-merged work it has no meaningful input; skip it in that case
-and do the security pass manually against the target range, noting in the
-review file that it was skipped and why. Treat this step as complete only once
-you have the raw findings in hand — then move to Step 2. Do not stop here.
+Do the pass **manually against `main...HEAD`** — that is the default here, not a
+fallback. The `security-review` skill diffs the *working tree against HEAD*, and
+you review a committed branch with a clean tree, so that diff is empty by
+definition and the skill has nothing to read. This is structural: it applies to
+every orchestrated review, not only onboarding audits or already-merged work. A
+skill run reporting "no findings" against an empty diff is a false negative —
+never read it as clearance. Work the CLAUDE.md security checklist against the
+branch diff yourself (unauthenticated endpoints, credentials at rest, overly
+broad permissions, injection surfaces, destructive ops without gates), and note
+in the review file that the skill was skipped because the target range is
+committed. Run the skill only if you genuinely have uncommitted changes to scan.
+On large or risky diffs, `code-review` is still worth running as a second pass
+where it is model-invocable. Treat this step as complete only once you have the
+raw findings in hand — then move to Step 2. Do not stop here.
 
 **Step 2 — Correctness pass.** Read the diff against `PRODUCT.md`,
 `ARCHITECTURE.md`, `AGENT.md`, `DECISIONS.md` for logic errors, edge cases, and
@@ -65,7 +78,11 @@ behavior that contradicts the docs.
 doc-vs-code drift, missing tests on new/modified functions and routes, and every
 item in CLAUDE.md's "Standing checklist" section (working tree clean, STATUS.md
 within limits, file structures conform, no secrets, Verify block present and
-passing).
+passing). Two citation items belong here: run `bash .githooks/check-citations.sh`
+(exit 0 required — stale evidence is an ISSUE), and confirm any `## Proposed
+ADRs` in the plan actually landed in `DECISIONS.md` with real symbol evidence.
+An ADR citing `file.ts:57` rather than a symbol is a SUGGESTION to convert, even
+when the line currently resolves.
 
 **Step 4 — Write the review file.** Merge findings from Steps 1–3 (dedupe the
 security-skill findings against your own) into a single

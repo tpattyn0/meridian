@@ -1,5 +1,13 @@
 {
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          { "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/write-guard.js\"", "timeout": 5 }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "matcher": "",
