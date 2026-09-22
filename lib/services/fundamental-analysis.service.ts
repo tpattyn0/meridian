@@ -51,7 +51,12 @@ interface FundamentalMetrics {
   dividend: {
     yield: number | null;
     payoutRatio: number | null;
-    growthRate: number | null;
+    // SCM-09: this was previously named `growthRate` but populated with
+    // summaryDetail.fiveYearAvgDividendYield — a yield, not a growth rate.
+    // Renamed to the honest label; no real dividend-growth computation is
+    // implemented (would need trailing dividend-per-share CAGR, a separate
+    // data need — see reviews/2026-07-17-scoring-methodology.md SCM-09).
+    fiveYearAvgYield: number | null;
   };
   score: {
     total: number;
@@ -80,8 +85,17 @@ interface FundamentalMetrics {
  * fetched. Bumping the version here is the mechanism that invalidates every
  * row cached from the old modules payload — a deliberate one-time refetch
  * per symbol, not a bug.
+ *
+ * Bumped to 3 (plans/2026-07-26-scoring-methodology-phase1-correctness.md,
+ * SCM-01/02/07/08/10/12): extraction/scoring changed in ways that make a row
+ * cached under version 2 score differently if recomputed — 0-vs-null
+ * extraction (SCM-01), negative D/E exclusion (SCM-02), P/FCF capex fallback
+ * (SCM-07), EV/EBITDA sign disambiguation (SCM-08), dividend pillar
+ * renormalization + joint yield/payout scoring (SCM-10), and the PEG
+ * forward-growth fallback (SCM-12). A single bump covers all of them — one
+ * deliberate one-time refetch per symbol, not per fix.
  */
-export const SCORING_VERSION = 2;
+export const SCORING_VERSION = 3;
 
 export class FundamentalAnalysisService {
   /**
@@ -193,7 +207,16 @@ export class FundamentalAnalysisService {
     const summaryDetail = data.summaryDetail || {};
     const defaultKeyStatistics = data.defaultKeyStatistics || {};
     const financialData = data.financialData || {};
-    const earningsTrend = data.earningsTrend?.trend?.[0]?.earningsEstimate;
+    // SCM-P1-S2: Yahoo's earningsTrend.trend[] is ordered by period
+    // ("0q","+1q","0y","+1y","+5y","-5y", not indexed by recency) — trend[0]
+    // is the CURRENT-QUARTER estimate, not the long-term "+5y" figure the
+    // PEG fallback below is meant to use. Select the "+5y" entry explicitly
+    // by its `period` field; fall back to "+1y" (next-year) if +5y is
+    // absent from the fetched payload, then to trend[0] as a last resort so
+    // a missing/reshaped payload still degrades to the old behavior instead
+    // of throwing.
+    const earningsTrendEntry = this.selectLongTermEarningsTrend(data.earningsTrend?.trend);
+    const earningsTrend = earningsTrendEntry?.earningsEstimate;
 
 
     // Calculate EPS (Earnings Per Share)
@@ -210,10 +233,18 @@ export class FundamentalAnalysisService {
       (currentPrice && forwardEps && forwardEps > 0 ? currentPrice / forwardEps : null);
 
     // Calculate P/FCF (Price to Free Cash Flow)
-    // Try multiple sources for free cash flow data
-    const freeCashFlow = financialData.freeCashflow ||
-      financialData.operatingCashflow ||
-      null;
+    // SCM-07: previously fell back from freeCashflow to operatingCashflow
+    // (ignoring capex), overstating FCF most for capital-intensive firms.
+    // Now: prefer Yahoo's own freeCashflow; if absent, compute true FCF =
+    // operatingCashflow - capex from the already-fetched cash-flow-statement
+    // module; if capex is unavailable, leave FCF (and therefore pfcfRatio)
+    // null rather than silently substituting operating cash flow.
+    const capex = data.cashflowStatementHistory?.cashflowStatements?.[0]?.capitalExpenditures;
+    let freeCashFlow: number | null = typeof financialData.freeCashflow === 'number' ? financialData.freeCashflow : null;
+    if (freeCashFlow === null && typeof financialData.operatingCashflow === 'number' && typeof capex === 'number') {
+      // Yahoo reports capitalExpenditures as a negative number (cash outflow).
+      freeCashFlow = financialData.operatingCashflow + capex;
+    }
     const marketCap = price.marketCap || summaryDetail.marketCap || null;
 
 
@@ -226,14 +257,28 @@ export class FundamentalAnalysisService {
     const peRatio = summaryDetail.trailingPE || (price.regularMarketPrice && eps ? price.regularMarketPrice / eps : null);
 
     // Calculate PEG Ratio
-    // PEG = P/E / (Earnings Growth Rate * 100)
-    // Try to get it from Yahoo first, otherwise calculate it
+    // PEG = P/E / (Growth Rate * 100)
+    // SCM-12: prefer Yahoo's own PEG; then the analyst forward growth
+    // estimate from earningsTrend's "+5y" (falling back to "+1y") entry —
+    // see selectLongTermEarningsTrend — the multi-year expected growth PEG
+    // is conventionally defined on, not a single noisy YoY print; only then
+    // the single-year YoY fallback (low-confidence — no 3-year historical
+    // EPS CAGR is available from the Yahoo modules this service fetches, so
+    // that middle tier is not implementable without a new data source;
+    // flagged here for a future pass rather than silently treated as done).
     let pegRatio = defaultKeyStatistics.pegRatio || null;
 
-    if (!pegRatio && peRatio && financialData.earningsGrowth) {
-      const earningsGrowthPercent = financialData.earningsGrowth * 100; // Convert to percentage
-      if (earningsGrowthPercent > 0 && peRatio > 0) {
-        pegRatio = peRatio / earningsGrowthPercent;
+    if (!pegRatio && peRatio && peRatio > 0) {
+      const forwardGrowth = earningsTrend?.growth;
+      if (typeof forwardGrowth === 'number' && forwardGrowth > 0) {
+        pegRatio = peRatio / (forwardGrowth * 100);
+      } else if (financialData.earningsGrowth) {
+        // Single-year YoY fallback (low-confidence — no multi-year estimate
+        // or CAGR available for this symbol).
+        const earningsGrowthPercent = financialData.earningsGrowth * 100;
+        if (earningsGrowthPercent > 0) {
+          pegRatio = peRatio / earningsGrowthPercent;
+        }
       }
     }
 
@@ -253,31 +298,52 @@ export class FundamentalAnalysisService {
         bookValue,
       },
       profitability: {
-        profitMargin: financialData.profitMargins || null,
-        operatingMargin: financialData.operatingMargins || null,
-        roe: financialData.returnOnEquity || null,
-        roa: financialData.returnOnAssets || null,
+        profitMargin: financialData.profitMargins ?? null,
+        operatingMargin: financialData.operatingMargins ?? null,
+        roe: financialData.returnOnEquity ?? null,
+        roa: financialData.returnOnAssets ?? null,
         roic: null,
       },
       growth: {
-        revenueGrowth: financialData.revenueGrowth || null,
-        earningsGrowth: financialData.earningsGrowth || null,
+        revenueGrowth: financialData.revenueGrowth ?? null,
+        earningsGrowth: financialData.earningsGrowth ?? null,
         fcfGrowth: null,
       },
       financial: {
-        currentRatio: financialData.currentRatio || null,
-        quickRatio: financialData.quickRatio || null,
-        debtToEquity: financialData.debtToEquity ? financialData.debtToEquity / 100 : null,
+        currentRatio: financialData.currentRatio ?? null,
+        quickRatio: financialData.quickRatio ?? null,
+        debtToEquity: typeof financialData.debtToEquity === 'number' ? financialData.debtToEquity / 100 : null,
         interestCoverage: null,
       },
       dividend: {
         yield: summaryDetail.dividendYield || summaryDetail.trailingAnnualDividendYield || null,
         payoutRatio: summaryDetail.payoutRatio || null,
-        growthRate: summaryDetail.fiveYearAvgDividendYield || null,
+        fiveYearAvgYield: summaryDetail.fiveYearAvgDividendYield || null,
       },
     };
   }
 
+  /**
+   * SCM-P1-S2: Yahoo's `earningsTrend.trend[]` array is ordered by
+   * `period` — typically `["0q","+1q","0y","+1y","+5y","-5y"]` — not by
+   * "most relevant first". `trend[0]` is therefore the current-quarter
+   * estimate, not the long-term growth figure PEG is conventionally
+   * defined on. This selects the `+5y` entry by its `period` field
+   * (long-term expected growth); if the fetched payload doesn't include a
+   * `+5y` entry, falls back to `+1y` (next-year, still a multi-period
+   * analyst estimate rather than a single quarter); if neither is present,
+   * falls back to `trend[0]` so a reshaped/partial payload still degrades
+   * gracefully instead of losing the PEG fallback entirely.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private selectLongTermEarningsTrend(trend: Array<Record<string, any>> | undefined): Record<string, any> | undefined {
+    if (!Array.isArray(trend) || trend.length === 0) return undefined;
+    return (
+      trend.find((t) => t?.period === '+5y') ||
+      trend.find((t) => t?.period === '+1y') ||
+      trend[0]
+    );
+  }
 
   private calculateFundamentalScore(metrics: Omit<FundamentalMetrics, 'score'>): { total: number; breakdown: { valuation: number; profitability: number; growth: number; financial: number; dividend: number; }; interpretation: string; } {
     const breakdown = {
@@ -311,7 +377,17 @@ export class FundamentalAnalysisService {
       valuationScores.push({ score: this.scorePFCF(metrics.valuation.pfcfRatio), weight: 1.5 });
     }
     if (metrics.valuation.evToEbitda !== null) {
-      valuationScores.push({ score: this.scoreEVToEbitda(metrics.valuation.evToEbitda), weight: 1 });
+      // SCM-08: a negative ratio is ambiguous — negative EBITDA
+      // (unprofitable, bearish) and negative EV (cash exceeds market cap, a
+      // deep-value signal) previously both scored 3. Disambiguate by the
+      // sign of enterpriseValue (already extracted/persisted — avoids
+      // needing a new schema field for EBITDA itself): a negative ratio with
+      // a positive EV implies negative EBITDA; a negative EV implies the
+      // opposite regardless of EBITDA's own sign.
+      valuationScores.push({
+        score: this.scoreEVToEbitda(metrics.valuation.evToEbitda, metrics.valuation.enterpriseValue),
+        weight: 1,
+      });
     }
 
     breakdown.valuation = valuationScores.length > 0
@@ -352,7 +428,14 @@ export class FundamentalAnalysisService {
       financialScores.push(this.scoreCurrentRatio(metrics.financial.currentRatio));
     }
     if (metrics.financial.debtToEquity !== null) {
-      financialScores.push(this.scoreDebtToEquity(metrics.financial.debtToEquity));
+      // SCM-02: negative D/E (accumulated-loss distress, not benign
+      // buybacks) is excluded from scoring rather than mapped into the
+      // best-in-class bracket by scoreDebtToEquity's `< 0.3` check.
+      if (metrics.financial.debtToEquity < 0) {
+        console.warn('Negative shareholder equity — debt-to-equity not meaningful, excluded from financial score');
+      } else {
+        financialScores.push(this.scoreDebtToEquity(metrics.financial.debtToEquity));
+      }
     }
     if (metrics.financial.quickRatio !== null) {
       financialScores.push(this.scoreQuickRatio(metrics.financial.quickRatio));
@@ -362,24 +445,44 @@ export class FundamentalAnalysisService {
       : 5;
 
     // Dividend Score
-    const dividendScores = [];
-    if (metrics.dividend.yield !== null && metrics.dividend.yield > 0) {
-      dividendScores.push(this.scoreDividendYield(metrics.dividend.yield));
+    // SCM-10: (a) a non-payer previously scored dividend = 0 at a fixed 5%
+    // composite weight — a systematic penalty for buyback-oriented capital
+    // return, which is not a company defect. Now: a non-payer (no yield)
+    // drops the dividend pillar entirely and the total is renormalized over
+    // the remaining four pillars (weightedFundamentalTotal already divides
+    // by weightSum, so zeroing this weight below renormalizes automatically).
+    // (b) yield is no longer rewarded monotonically — scored jointly with
+    // payout ratio so a high yield + a high (>80%) payout ratio (a classic
+    // yield-trap pattern: price collapsed, cut imminent) scores lower than
+    // the same yield paired with a sustainable payout.
+    const isPayer = metrics.dividend.yield !== null && metrics.dividend.yield > 0;
+    let dividendApplicable = false;
+    if (isPayer) {
+      dividendApplicable = true;
+      const yieldScore = this.scoreDividendYield(
+        metrics.dividend.yield as number,
+        metrics.dividend.payoutRatio
+      );
+      if (metrics.dividend.payoutRatio !== null && metrics.dividend.payoutRatio > 0) {
+        const payoutScore = this.scorePayoutRatio(metrics.dividend.payoutRatio);
+        breakdown.dividend = (yieldScore + payoutScore) / 2;
+      } else {
+        breakdown.dividend = yieldScore;
+      }
     }
-    if (metrics.dividend.payoutRatio !== null && metrics.dividend.payoutRatio > 0) {
-      dividendScores.push(this.scorePayoutRatio(metrics.dividend.payoutRatio));
-    }
-    breakdown.dividend = dividendScores.length > 0
-      ? dividendScores.reduce((a, b) => a + b, 0) / dividendScores.length
-      : 0;
 
     // Calculate total score (weighted average) — uses the same
     // DEFAULT_SCORING_WEIGHTS.fundamental + weightedFundamentalTotal the
     // rest of the app shares (lib/utils/scoring-weights.ts), so this
     // default-weighted total is the single source of truth, not a second
     // definition (plans/2026-07-20-configurable-scoring-weights.md, Task 8).
-    // Byte-identical to the previous inline weights object + formula.
-    const totalScore = weightedFundamentalTotal(breakdown, DEFAULT_SCORING_WEIGHTS.fundamental);
+    // A non-payer zeroes the dividend weight for THIS total only (local
+    // renormalization over the other four pillars) — DEFAULT_SCORING_WEIGHTS
+    // itself is untouched, so a payer scores byte-identically to before.
+    const effectiveWeights = dividendApplicable
+      ? DEFAULT_SCORING_WEIGHTS.fundamental
+      : { ...DEFAULT_SCORING_WEIGHTS.fundamental, dividend: 0 };
+    const totalScore = weightedFundamentalTotal(breakdown, effectiveWeights);
 
     // Generate interpretation
     const interpretation = this.generateInterpretation(totalScore, breakdown, metrics);
@@ -458,8 +561,19 @@ export class FundamentalAnalysisService {
     return 3;
   }
 
-  private scoreEVToEbitda(ratio: number): number {
-    if (ratio < 0) return 3;
+  // SCM-08: `enterpriseValue` disambiguates which side of the ratio went
+  // negative. ratio < 0 with a positive (or unknown) EV means EBITDA is
+  // negative — genuinely unprofitable, still bearish (3). ratio < 0 with a
+  // negative EV means cash exceeds market cap — a deep-value signal — score
+  // high with a warning instead of bearish.
+  private scoreEVToEbitda(ratio: number, enterpriseValue: number | null = null): number {
+    if (ratio < 0) {
+      if (enterpriseValue !== null && enterpriseValue < 0) {
+        console.warn('Negative enterprise value (cash exceeds market cap) — scoring EV/EBITDA as a deep-value signal, not bearish');
+        return 8;
+      }
+      return 3;
+    }
     if (ratio < 8) return 9;
     if (ratio < 12) return 7;
     if (ratio < 15) return 5;
@@ -533,13 +647,29 @@ export class FundamentalAnalysisService {
     return 3;
   }
 
-  private scoreDividendYield(dividendYield: number): number {
-    if (dividendYield > 0.05) return 9;
-    if (dividendYield > 0.04) return 8;
-    if (dividendYield > 0.03) return 7;
-    if (dividendYield > 0.02) return 6;
-    if (dividendYield > 0.01) return 5;
-    return 3;
+  // SCM-10(b): yield is no longer rewarded purely monotonically. An
+  // abnormally high yield paired with a high payout ratio (>0.8) is more
+  // often a distress/yield-trap signal (price collapsed, cut imminent) than
+  // a gift, so the bracket score is penalized in that combination. A high
+  // yield with a low/moderate (or unknown) payout ratio keeps the original
+  // monotonic bracket unchanged.
+  private scoreDividendYield(dividendYield: number, payoutRatio: number | null = null): number {
+    let score: number;
+    if (dividendYield > 0.05) score = 9;
+    else if (dividendYield > 0.04) score = 8;
+    else if (dividendYield > 0.03) score = 7;
+    else if (dividendYield > 0.02) score = 6;
+    else if (dividendYield > 0.01) score = 5;
+    else score = 3;
+
+    const isHighYield = dividendYield > 0.05;
+    const isHighPayout = payoutRatio !== null && payoutRatio > 0.8;
+    if (isHighYield && isHighPayout) {
+      // Yield-trap pattern: cap well below the top bracket instead of the
+      // monotonic 9.
+      return 4;
+    }
+    return score;
   }
 
   private scorePayoutRatio(ratio: number): number {
@@ -599,7 +729,7 @@ export class FundamentalAnalysisService {
         debtToEquity: metrics.financial.debtToEquity,
         dividendYield: metrics.dividend.yield,
         payoutRatio: metrics.dividend.payoutRatio,
-        dividendGrowth: metrics.dividend.growthRate,
+        dividendGrowth: metrics.dividend.fiveYearAvgYield, // SCM-09: column name unchanged (no migration); the value it holds is honestly a yield, per the renamed metrics field above
         fundamentalScore: metrics.score.total,
         scoreDetails: scoreDetailsWithVersion,
         lastUpdated: new Date(),
@@ -631,7 +761,7 @@ export class FundamentalAnalysisService {
         debtToEquity: metrics.financial.debtToEquity,
         dividendYield: metrics.dividend.yield,
         payoutRatio: metrics.dividend.payoutRatio,
-        dividendGrowth: metrics.dividend.growthRate,
+        dividendGrowth: metrics.dividend.fiveYearAvgYield, // SCM-09: column name unchanged (no migration); the value it holds is honestly a yield, per the renamed metrics field above
         fundamentalScore: metrics.score.total,
         scoreDetails: scoreDetailsWithVersion,
       },
@@ -690,7 +820,7 @@ export class FundamentalAnalysisService {
       dividend: {
         yield: cached.dividendYield,
         payoutRatio: cached.payoutRatio,
-        growthRate: cached.dividendGrowth,
+        fiveYearAvgYield: cached.dividendGrowth,
       },
       score,
     };

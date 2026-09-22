@@ -372,3 +372,50 @@
 - **Tradeoffs:** The boilerplate demotion is a narrow, regex-matched title-shape heuristic, not a structural "is this a filing notice" classifier — a publisher phrasing this plan's regex set doesn't cover will still score undemoted (mitigated: demotion is a multiplier on top of the saturation fix, not the sole defense, so an undemoted boilerplate item is capped at the same `1.0`/`0.8` band as genuine coverage rather than dominating by uncapped stacking as before). The saturation fix flattens same-field multi-token matches to one band, which slightly reduces the scorer's resolution within the "clearly relevant" range — for the RSS path specifically (the volume source, title-only, self-tagged `symbols`), the only two reachable values are `0.40` (demoted) and `0.80` (undemoted); `1.0` requires a summary/content match no RSS article carries, correcting an earlier overclaim of `0.5`/`0.8`/`1.0` clustering (NSA3-S1) — accepted, because the alternative (the pre-fix per-token accumulation) is the regression itself. **`(TITLE_MATCH_SCORE + SYMBOLS_MATCH_SCORE) × BOILERPLATE_DEMOTION_FACTOR = (0.5 + 0.3) × 0.5 = 0.40`, which lands exactly on `MIN_RELEVANCE = 0.4`** — a demoted RSS-sourced 13F notice survives only because `scoreRelevance`'s comparisons use `>=`; this coupling is now documented at `BOILERPLATE_DEMOTION_FACTOR`'s declaration and pinned by a dedicated test (NSA3-S1) so a future change to any of these four constants that breaks the relationship fails loudly. The actor-anchor tightening trades recall for precision: a genuinely institutional actor whose name doesn't happen to carry a recognized suffix (e.g. "Berkshire Hathaway" with no LLC/Inc./Trust-style suffix) is no longer demoted even if it is, in substance, routine portfolio-rebalancing coverage — accepted per the owner's NSA3-Q1 decision, since a bare-name institutional buy is also more often genuinely newsworthy (a large, named investor's position change) than an anonymous small-fund 13F notice. The self-exclusion fix (NSA4-I1) trades a small amount of recall for precision in the opposite direction it was needed: it can only ever un-demote, so its only cost is that a (hypothetical, unobserved) filer whose name happens to literally equal the subject company's name would also escape demotion — accepted as unreachable in practice, since an institutional filer and its subject company sharing an identical name is not a real-world shape. The positional-adjacency false-negative class (TD-43) remains open by deliberate choice, not oversight — see the amendment above. A known, explicitly out-of-scope residual: the scorer still cannot distinguish "mentions the company" from "is about the company" (an article about a different company that name-drops the requested one in its title still clears `MIN_RELEVANCE`) — tracked as `TECH_DEBT.md` TD-42, not fixed here, because a safe fix needs subject/entity extraction the current architecture has no signal for.
 - **Status:** accepted
 - **Confidence:** High
+## ADR-30 — Analyst rating score recentered (SCM-11); DCF Lite terminal multiple capped at 18 (SCM-05); Graham Number confidence defaulted to low (SCM-06)
+- **Decision:** Three calibration choices from `reviews/2026-07-17-scoring-methodology.md` Phase 1
+  (`plans/2026-07-26-scoring-methodology-phase1-correctness.md`), all accepted per the review's
+  own recommendation with no further owner input required (review's "Ready for Coding agent"
+  gate): (1) `AnalystRatingsService.calculateScore`'s rating-to-score mapping is recentered from
+  StrongBuy=10/Buy=8/Hold=5/Sell=2/StrongSell=0 to StrongBuy=9/Buy=7/Hold=4/Sell=1.5/StrongSell=0
+  (the review's lowest-effort "option 3" of three offered — recenter only, no revision-momentum
+  or cross-sectional-percentile component) so a realistic buy-skewed sell-side consensus
+  (~55% Buy/40% Hold/5% Sell — sell-side analysts rarely publish Sell ratings) lands ≈5.5 instead
+  of ≈6.5–8.5. `getScoreInterpretation`'s label thresholds move down in lockstep (6/4.5/3/1.5 vs.
+  the old 7/5.5/4.5/3) so labels stay sensible against the new score range. (2) DCF Lite's terminal
+  P/E multiple is capped at `min(trailingPE, 18)` (was `min(trailingPE, <50)`, i.e. effectively
+  uncapped for most stocks) — the stock's own uncapped current multiple was circular, granting an
+  expensive stock an expensive exit multiple that validates its own price. (3) Graham Number's
+  ensemble confidence is unconditionally `low` (was `high` — 3× ensemble weight — whenever
+  eps/bookValue were present) — Graham Number is the least applicable of the five intrinsic-value
+  methods for a modern asset-light equity (its 1934-era book-value ceilings read "overvalued"
+  permanently for a company that holds value in intangibles, not book value), so it should never
+  have outweighed the other four methods by construction.
+- **Evidence:** `lib/services/analyst-ratings.service.ts:193-224` (`calculateScore`,
+  `getScoreInterpretation`), `lib/services/analyst-ratings.service.test.ts` ("SCM-11 recentered
+  rating mapping" describe block); `lib/services/intrinsic-value.service.ts:112-159`
+  (`calculateDCFLite`'s `TERMINAL_PE_CAP = 18`), `:168-196` (`calculateGrahamNumber`'s
+  `confidence: 'low'`), `lib/services/intrinsic-value.service.test.ts` ("SCM-05 terminal multiple
+  cap" and "SCM-06 confidence default" describe blocks).
+- **Tradeoffs:** (1) is a calibration choice, not a structural fix — the review's higher-value
+  options (revision-momentum from the already-persisted `upgradeDowngradeHistory`, or a
+  cross-sectional percentile) would extract more signal from the same data but need materially
+  more work; recentering alone still doesn't discriminate stocks with genuinely different analyst
+  sentiment, it only removes the constant bullish offset. Flagged for a possible Phase-2/3 revisit
+  (review SCM-11, plan Open decisions). The analyst service's cache has no `SCORING_VERSION`-style
+  gate (only a 24h `lastUpdated` check), so recentered scores land within 24h naturally rather than
+  on next-deploy — a known lag, not a blocker. (2) An 18x cap is a documented, arbitrary ceiling,
+  not a sector-aware terminal multiple (SCM-14, not yet built) — a genuinely justified premium
+  compounder is capped identically to a mediocre business at the same trailing P/E; this is the
+  explicitly-scoped interim fix, not the final design. (3) A permanent `low` confidence for Graham
+  Number means it can never regain influence in the ensemble even for the sectors where book value
+  genuinely is economically meaningful (financials, insurers, asset-heavy industrials) until SCM-14
+  (sector data) lands and a sector-gated elevation is built — an explicit, accepted interim
+  under-weighting, not a final design either.
+- **Status:** accepted
+- **Confidence:** High — all three changes are pure, unit-tested, and match the review's stated
+  recommendation verbatim; the plan's Assumptions section states approving the plan approves the
+  review's recommended direction for all of SCM-01…13 with no further owner sign-off gate. SCM-06
+  was missing from the plan's own Tasks/Files-to-modify lists despite being named in the plan's
+  title, Problem section, and Approach's "Key decisions" — the Coding agent found and closed this
+  drafting gap in-session (see the plan file and `AGENT.md`'s corresponding fragile-surface note).
