@@ -192,7 +192,13 @@ describe("AnalystRatingsService — targetLow/High and revisions mapping", () =>
   });
 
   it("maps upgradeDowngradeHistory.history into typed revisions when present", async () => {
-    const epochGradeDate = new Date("2026-06-01T00:00:00.000Z");
+    // Relative to now, NOT a literal date. `fetchAnalystRatings` windows revisions
+    // through `filterRecentRevisions(..., new Date())` against the real clock, so a
+    // hardcoded date silently ages out of the 90-day window and turns this test red
+    // with no code change — which is exactly what happened to `2026-06-01` (written
+    // 2026-07-20, started failing ~2026-08-30). Keep any date fed through the live
+    // fetch path derived from `Date.now()`.
+    const epochGradeDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     safeQuoteSummaryMock.mockResolvedValueOnce({
       financialData: { targetMeanPrice: 175 },
       recommendationTrend: { trend: [{ strongBuy: 5, buy: 3, hold: 2, sell: 0, strongSell: 0 }] },
